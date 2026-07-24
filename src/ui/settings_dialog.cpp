@@ -139,6 +139,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     queueOpacitySpin = new QSpinBox(this);
     queueOpacitySpin->setRange(20, 100);
     queueOpacitySpin->setSuffix("%");
+    queueHoverColorEdit = new QLineEdit(this);
+    queueHoverColorPreview = createColorPreview(this);
     QLabel *queueHint = new QLabel("The Up Next window stays on top and never auto-hides. Drag it anywhere with the mouse, resize it from the left/right edge — position and size are remembered. Locking makes it click-through so it can't be moved or block clicks; toggle the lock any time with Alt+U.", this);
     queueHint->setWordWrap(true);
 
@@ -148,6 +150,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     queueLayout->addRow(QString(), queueShowLockIconCheck);
     queueLayout->addRow("Songs shown", queueMaxSongsSpin);
     queueLayout->addRow("Opacity", queueOpacitySpin);
+    queueLayout->addRow("Hover color", createColorFieldRow(queueHoverColorEdit, queueHoverColorPreview, queueTab));
     queueLayout->addRow(QString(), queueHint);
     tabs->addTab(queueTab, "Up Next");
 
@@ -262,6 +265,8 @@ void SettingsDialog::setQueueSettings(const QueueSettings &settings) {
     queueShowLockIconCheck->setChecked(settings.showLockIcon);
     queueMaxSongsSpin->setValue(settings.maxSongs);
     queueOpacitySpin->setValue(settings.opacityPercent);
+    queueHoverColorEdit->setText(settings.hoverColor);
+    updateColorPreview(queueHoverColorEdit, queueHoverColorPreview);
     queueWindowX = settings.windowX;
     queueWindowY = settings.windowY;
     queueWindowWidth = settings.windowWidth;
@@ -275,6 +280,7 @@ QueueSettings SettingsDialog::queueSettings() const {
     settings.showLockIcon = queueShowLockIconCheck->isChecked();
     settings.maxSongs = queueMaxSongsSpin->value();
     settings.opacityPercent = queueOpacitySpin->value();
+    settings.hoverColor = queueHoverColorEdit->text().trimmed();
     settings.windowX = queueWindowX;
     settings.windowY = queueWindowY;
     settings.windowWidth = queueWindowWidth;
@@ -307,6 +313,10 @@ void SettingsDialog::wireQueueControls() {
     connect(queueShowLockIconCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
     connect(queueMaxSongsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
     connect(queueOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
+    connect(queueHoverColorEdit, &QLineEdit::textChanged, this, [this](const QString &) {
+        updateColorPreview(queueHoverColorEdit, queueHoverColorPreview);
+        emit queueSettingsChanged();
+    });
 }
 
 QWidget *SettingsDialog::createColorFieldRow(QLineEdit *edit, QLabel *preview, QWidget *parent) {

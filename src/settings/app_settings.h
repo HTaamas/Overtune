@@ -33,6 +33,7 @@ struct QueueSettings {
     bool showLockIcon = true;
     int maxSongs = 5;
     int opacityPercent = 100;
+    QString hoverColor = "#888888";
     // Last dragged position of the queue window; INT_MIN means "never placed"
     // and the window picks a default spot on the primary screen.
     int windowX = INT_MIN;

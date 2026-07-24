@@ -74,6 +74,8 @@ private:
     QCheckBox *queueShowLockIconCheck;
     QSpinBox *queueMaxSongsSpin;
     QSpinBox *queueOpacitySpin;
+    QLineEdit *queueHoverColorEdit;
+    QLabel *queueHoverColorPreview;
 
     bool authenticated = false;
     // Position/size aren't edited in the dialog; carried through so a settings

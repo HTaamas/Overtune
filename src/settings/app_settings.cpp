@@ -105,6 +105,7 @@ QueueSettings loadQueueSettings() {
     config.showLockIcon = settings.value("showLockIcon", config.showLockIcon).toBool();
     config.maxSongs = qBound(1, settings.value("maxSongs", config.maxSongs).toInt(), 30);
     config.opacityPercent = qBound(20, settings.value("opacityPercent", config.opacityPercent).toInt(), 100);
+    config.hoverColor = settings.value("hoverColor", config.hoverColor).toString();
     config.windowX = settings.value("windowX", config.windowX).toInt();
     config.windowY = settings.value("windowY", config.windowY).toInt();
     config.windowWidth = settings.value("windowWidth", config.windowWidth).toInt();
@@ -125,6 +126,7 @@ void saveQueueSettings(const QueueSettings &config) {
     settings.setValue("showLockIcon", config.showLockIcon);
     settings.setValue("maxSongs", config.maxSongs);
     settings.setValue("opacityPercent", config.opacityPercent);
+    settings.setValue("hoverColor", config.hoverColor);
     settings.setValue("windowX", config.windowX);
     settings.setValue("windowY", config.windowY);
     settings.setValue("windowWidth", config.windowWidth);

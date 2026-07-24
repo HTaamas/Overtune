@@ -299,6 +299,9 @@ void QueueWindow::applyQueueSettings(const QueueSettings &settings) {
         }
     }
 
+    for (const Row &row : rows) {
+        styleRowLabels(row);
+    }
     refreshRows(/*animate=*/isVisible());
     updateVisibility();
 }
@@ -422,7 +425,9 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     row.hoverBg->lower();
 
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
-    rowLayout->setContentsMargins(0, 0, 0, 0);
+    // Inner padding keeps the content (index and duration especially) from
+    // sitting flush against the hover highlight's rounded edges.
+    rowLayout->setContentsMargins(8, 0, 8, 0);
     rowLayout->setSpacing(8);
 
     row.indexLabel = new QLabel(row.widget);
@@ -464,7 +469,11 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
 }
 
 void QueueWindow::styleRowLabels(const Row &row) const {
-    static_cast<HoverHighlight *>(row.hoverBg)->setColor(QColor(overlaySettings.accentColor));
+    QColor hoverColor(queueSettings.hoverColor);
+    if (!hoverColor.isValid()) {
+        hoverColor = QColor("#888888");
+    }
+    static_cast<HoverHighlight *>(row.hoverBg)->setColor(hoverColor);
     row.indexLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
     row.titleLabel->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
     row.artistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
@@ -643,9 +652,9 @@ void QueueWindow::animateToContentHeight() {
 }
 
 void QueueWindow::updateElides() {
-    // Text budget: row width minus index column, album art, duration column
-    // and layout spacing. QLabel doesn't elide on its own.
-    const int textBudget = qMax(60, rowWidth() - 22 - kArtSize - 44 - 24);
+    // Text budget: row width minus row padding, index column, album art,
+    // duration column and layout spacing. QLabel doesn't elide on its own.
+    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - 44 - 24);
 
     for (Row &row : rows) {
         row.titleLabel->setText(QFontMetrics(row.titleLabel->font()).elidedText(row.fullTitle, Qt::ElideRight, textBudget));
