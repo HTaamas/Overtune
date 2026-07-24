@@ -14,6 +14,7 @@ class QLabel;
 class QNetworkAccessManager;
 class QProgressBar;
 class QPropertyAnimation;
+class QVariantAnimation;
 class QTimer;
 
 // A small always-on-top "Up Next" panel in the same visual style as the OSD.
@@ -65,7 +66,7 @@ private:
         QLabel *artistLabel = nullptr;
         QLabel *durationLabel = nullptr;
         QPointer<QPropertyAnimation> posAnimation;
-        QPointer<QPropertyAnimation> hoverAnimation;
+        QPointer<QVariantAnimation> hoverAnimation;
     };
 
     void refreshRows(bool animate);

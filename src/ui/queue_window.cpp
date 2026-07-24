@@ -15,6 +15,7 @@
 #include <QPropertyAnimation>
 #include <QScreen>
 #include <QTimer>
+#include <QVariantAnimation>
 #include <QVBoxLayout>
 
 #ifdef __APPLE__
@@ -42,6 +43,13 @@ constexpr int kRowFadeInMs = 240;
 constexpr int kRowFadeOutMs = 180;
 constexpr int kRowEnterOffsetPx = 14;
 constexpr int kLockIconSize = 14;
+constexpr int kHoverMaxAlpha = 36; // out of 255, ~14%
+
+QString hoverBgStyle(const QColor &accent, qreal alphaFraction) {
+    return QString("background-color: rgba(%1,%2,%3,%4); border: none; border-radius: 6px;")
+        .arg(accent.red()).arg(accent.green()).arg(accent.blue())
+        .arg(int(alphaFraction * kHoverMaxAlpha));
+}
 
 QPixmap lockPixmap(int size, const QColor &color) {
     QPixmap pm(size, size);
@@ -376,11 +384,11 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     row.widget->installEventFilter(this);
 
     // Sits behind the labels (created first = lowest); fades in on hover.
+    // The fade animates the stylesheet's alpha — the row already carries a
+    // QGraphicsOpacityEffect for enter/exit fades, and effects don't nest.
     row.hoverBg = new QWidget(row.widget);
     row.hoverBg->setGeometry(row.widget->rect());
-    QGraphicsOpacityEffect *hoverEffect = new QGraphicsOpacityEffect(row.hoverBg);
-    hoverEffect->setOpacity(0.0);
-    row.hoverBg->setGraphicsEffect(hoverEffect);
+    row.hoverBg->setProperty("hoverAlpha", 0.0);
     row.hoverBg->lower();
 
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
@@ -427,8 +435,7 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
 
 void QueueWindow::styleRowLabels(const Row &row) const {
     const QColor accent(overlaySettings.accentColor);
-    row.hoverBg->setStyleSheet(QString("background-color: rgba(%1,%2,%3,14%); border: none; border-radius: 6px;")
-        .arg(accent.red()).arg(accent.green()).arg(accent.blue()));
+    row.hoverBg->setStyleSheet(hoverBgStyle(accent, row.hoverBg->property("hoverAlpha").toReal()));
     row.indexLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
     row.titleLabel->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
     row.artistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
@@ -450,19 +457,21 @@ void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int ind
 }
 
 void QueueWindow::animateRowHover(Row &row, bool hovered) {
-    QGraphicsOpacityEffect *effect = opacityEffectOf(row.hoverBg);
-    if (!effect) {
-        return;
-    }
     if (row.hoverAnimation) {
         row.hoverAnimation->stop();
     }
 
-    QPropertyAnimation *fade = new QPropertyAnimation(effect, "opacity", row.hoverBg);
+    QWidget *bg = row.hoverBg;
+    const QColor accent(overlaySettings.accentColor);
+    QVariantAnimation *fade = new QVariantAnimation(bg);
     fade->setDuration(hovered ? 150 : 220);
     fade->setEasingCurve(QEasingCurve::OutQuad);
-    fade->setStartValue(effect->opacity());
+    fade->setStartValue(bg->property("hoverAlpha").toReal());
     fade->setEndValue(hovered ? 1.0 : 0.0);
+    connect(fade, &QVariantAnimation::valueChanged, bg, [bg, accent](const QVariant &value) {
+        bg->setProperty("hoverAlpha", value.toReal());
+        bg->setStyleSheet(hoverBgStyle(accent, value.toReal()));
+    });
     row.hoverAnimation = fade;
     fade->start(QAbstractAnimation::DeleteWhenStopped);
 }
