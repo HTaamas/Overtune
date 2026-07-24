@@ -6,6 +6,7 @@
 #ifdef _WIN32
 HHOOK VolumeHandler::hHook = nullptr;
 bool VolumeHandler::queueLockChordDown = false;
+bool VolumeHandler::likeChordDown = false;
 
 VolumeHandler::VolumeHandler(QObject *parent) : QObject(parent) {
     instance = this;
@@ -85,9 +86,14 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
 
     if (nCode == HC_ACTION) {
         KBDLLHOOKSTRUCT *pKey = reinterpret_cast<KBDLLHOOKSTRUCT *>(lParam);
+        const DWORD likeVk = instance ? DWORD(instance->keybindSettings.likeKey.toUInt(nullptr, 16)) : 0;
+
         if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             if (pKey->vkCode == 'U') {
                 queueLockChordDown = false;
+            }
+            if (likeVk != 0 && pKey->vkCode == likeVk) {
+                likeChordDown = false;
             }
         }
 
@@ -96,6 +102,14 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
                 if (!queueLockChordDown && instance) {
                     queueLockChordDown = true;
                     emit instance->toggleQueueLockRequested();
+                }
+                return 1;
+            }
+
+            if (likeVk != 0 && pKey->vkCode == likeVk && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0) {
+                if (!likeChordDown && instance) {
+                    likeChordDown = true;
+                    emit instance->likeSongRequested();
                 }
                 return 1;
             }

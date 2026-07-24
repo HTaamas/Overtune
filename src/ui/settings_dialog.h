@@ -68,6 +68,7 @@ private:
     QSpinBox *fineStepSpin;
     QCheckBox *useShiftFineAdjustCheck;
     QLineEdit *mainKeyEdit;
+    QLineEdit *likeKeyEdit;
     QCheckBox *queueEnabledCheck;
     QCheckBox *queueShowNowPlayingCheck;
     QCheckBox *queueLockedCheck;

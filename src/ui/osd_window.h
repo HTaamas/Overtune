@@ -22,6 +22,9 @@ public:
     explicit OSDWindow(QWidget *parent = nullptr);
     void showVolume(int volume, const QString &track, const QString &artist, const QString &albumArtUrl = "", int progressMs = 0, int durationMs = 0, bool isPlaying = false, bool volumeControlSupported = true);
     void syncProgress(int progressMs, bool isPlaying, bool volumeControlSupported);
+    // Accent-colored heart in the status row: filled when the current song
+    // is in Liked Songs, outlined when it isn't.
+    void setLikedState(bool liked);
     void applyOverlaySettings(const OverlaySettings &settings);
 
 private slots:
@@ -38,6 +41,8 @@ private:
     QLabel *albumArtLabel;
     QLabel *timeLabel;
     QLabel *volumeLabel;
+    QLabel *heartLabel;
+    bool likedNow = false;
     QProgressBar *volumeBar;
     QProgressBar *songProgressBar;
     QLabel *pauseOverlay;

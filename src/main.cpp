@@ -142,6 +142,7 @@ int main(int argc, char *argv[]) {
 
     int currentVolume = 50;
     QString currentTrack = "Loading...";
+    QString currentTrackId = "";
     QString currentArtist = "Spotify";
     QString currentArtUrl = "";
     int currentProgress = 0;
@@ -177,11 +178,13 @@ int main(int argc, char *argv[]) {
     QObject::connect(&spotify, &SpotifyClient::trackChanged, [&](int volume, const QString &track, const QString &artist, const QString &trackId, const QString &albumArtUrl, int progressMs, int durationMs, bool isPlaying, bool volumeControlSupported) {
         currentVolume = volume;
         currentTrack = track;
+        currentTrackId = trackId;
         currentArtist = artist;
         currentArtUrl = albumArtUrl;
         currentVolumeControlSupported = volumeControlSupported;
         updateProgressBaseline(progressMs, isPlaying);
         currentDuration = durationMs;
+        osd.setLikedState(spotify.isTrackLiked(trackId));
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
         queueWindow.setNowPlaying(trackId, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
         tray.updateTrackInfo(currentTrack, currentArtist);
@@ -234,6 +237,21 @@ int main(int argc, char *argv[]) {
         AppSettings::saveQueueSettings(settings);
         const QSignalBlocker blocker(&settingsDialog);
         settingsDialog.setQueueSettings(settings);
+    });
+
+    QObject::connect(&volHandler, &VolumeHandler::likeSongRequested, [&]() {
+        spotify.toggleLikeCurrentTrack();
+    });
+
+    QObject::connect(&spotify, &SpotifyClient::likedSongsLoaded, [&]() {
+        osd.setLikedState(spotify.isTrackLiked(currentTrackId));
+    });
+
+    QObject::connect(&spotify, &SpotifyClient::trackLikeFinished, [&](bool success, bool liked) {
+        if (success) {
+            osd.setLikedState(liked);
+        }
+        osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
     });
 
     QObject::connect(&volHandler, &VolumeHandler::toggleQueueLockRequested, [&]() {

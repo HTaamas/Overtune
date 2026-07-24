@@ -4,6 +4,11 @@
 #include <QWebSocket>
 #include <QSslError>
 #include <QDateTime>
+#include <QUuid>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QCryptographicHash>
+#include <QRandomGenerator>
 #include <iostream>
 #include <string>
 #include <zlib.h>
@@ -27,6 +32,7 @@ QT_WARNING_PUSH
 #include "spotify/extendedmetadata/extension_kind.pb.h"
 #include "spotify/extendedmetadata/entity_extension_data.pb.h"
 #include "spotify/metadata/metadata.pb.h"
+#include "spotify/collection/collection.pb.h"
 #pragma pop_macro("emit")
 #pragma pop_macro("slots")
 #pragma pop_macro("signals")
@@ -43,7 +49,14 @@ const char kClientVersion[] = "1.2.52.442.g01d2b6ec";
 const char kDeviceName[] = "SpotifyVol";
 
 const char kDeviceAuthorizeUrl[] = "https://accounts.spotify.com/oauth2/device/authorize";
+const char kAuthorizeUrl[] = "https://accounts.spotify.com/authorize";
 const char kTokenUrl[] = "https://accounts.spotify.com/api/token";
+
+// Whitelisted for Spotify's desktop client id — go-librespot uses the same
+// port/path, and the auth-code token response includes the canonical
+// username (the device flow's does not).
+constexpr quint16 kOAuthRedirectPort = 36842;
+const char kOAuthRedirectUri[] = "http://127.0.0.1:36842/login";
 const char kClientTokenUrl[] = "https://clienttoken.spotify.com/v1/clienttoken";
 const char kApresolveUrl[] = "https://apresolve.spotify.com/?type=dealer&type=spclient";
 
@@ -88,7 +101,100 @@ SpotifyClient::SpotifyClient(QObject *parent)
 // ---------------------------------------------------------------------------
 
 void SpotifyClient::startAuthorization() {
-    requestDeviceCode();
+    startPkceAuthorization();
+}
+
+void SpotifyClient::startPkceAuthorization() {
+    if (!authServer) {
+        authServer = new QTcpServer(this);
+        connect(authServer, &QTcpServer::newConnection, this, &SpotifyClient::onAuthServerConnection);
+    }
+    if (!authServer->isListening() && !authServer->listen(QHostAddress::LocalHost, kOAuthRedirectPort)) {
+        logMessage("[auth] local redirect port 36842 is busy; falling back to the pairing-code flow.");
+        requestDeviceCode();
+        return;
+    }
+
+    QByteArray randomBytes(64, 0);
+    for (char &b : randomBytes) {
+        b = char(QRandomGenerator::system()->bounded(256));
+    }
+    codeVerifier = QString::fromLatin1(randomBytes.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+    const QByteArray challenge = QCryptographicHash::hash(codeVerifier.toLatin1(), QCryptographicHash::Sha256)
+                                     .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+
+    QUrlQuery query;
+    query.addQueryItem("response_type", "code");
+    query.addQueryItem("client_id", kClientIdHex);
+    query.addQueryItem("redirect_uri", kOAuthRedirectUri);
+    query.addQueryItem("scope", QString(kDeviceFlowScopes).replace(',', ' '));
+    query.addQueryItem("code_challenge_method", "S256");
+    query.addQueryItem("code_challenge", QString::fromLatin1(challenge));
+
+    QUrl url(kAuthorizeUrl);
+    url.setQuery(query);
+
+    logMessage("Opening the Spotify authorization page; approve access in your browser.");
+    emit authorizationPending(url.toString(), QString());
+    QDesktopServices::openUrl(url);
+}
+
+void SpotifyClient::onAuthServerConnection() {
+    while (QTcpSocket *socket = authServer->nextPendingConnection()) {
+        connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
+            const QByteArray requestData = socket->readAll();
+            const QString requestLine = QString::fromUtf8(requestData.left(requestData.indexOf("\r\n")));
+            const QStringList parts = requestLine.split(' ');
+            const QString path = parts.size() >= 2 ? parts.at(1) : QString();
+
+            QString code;
+            if (path.startsWith("/login")) {
+                code = QUrlQuery(QUrl("http://localhost" + path).query()).queryItemValue("code");
+            }
+
+            const QByteArray page = code.isEmpty()
+                ? QByteArray("<html><body style=\"font-family:sans-serif\">Authorization failed - you can close this window.</body></html>")
+                : QByteArray("<html><body style=\"font-family:sans-serif\">SpotifyVol is connected - you can close this window.</body></html>");
+            socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: " +
+                          QByteArray::number(page.size()) + "\r\n\r\n" + page);
+            socket->flush();
+            socket->disconnectFromHost();
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+
+            if (!code.isEmpty()) {
+                authServer->close();
+                exchangeAuthCode(code);
+            }
+        });
+    }
+}
+
+void SpotifyClient::exchangeAuthCode(const QString &code) {
+    QUrlQuery form;
+    form.addQueryItem("grant_type", "authorization_code");
+    form.addQueryItem("code", code);
+    form.addQueryItem("redirect_uri", kOAuthRedirectUri);
+    form.addQueryItem("client_id", kClientIdHex);
+    form.addQueryItem("code_verifier", codeVerifier);
+
+    QNetworkRequest request{QUrl(QString::fromLatin1(kTokenUrl))};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    request.setRawHeader("User-Agent", kUserAgent);
+
+    QNetworkReply *reply = network->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        const QJsonObject obj = QJsonDocument::fromJson(data).object();
+        if (obj.value("access_token").toString().isEmpty()) {
+            logMessage("Authorization code exchange failed: " + QString::fromUtf8(data.left(300)));
+            return;
+        }
+        applyTokenResponse(obj);
+        logMessage("Authorized! Bringing up the Spotify session...");
+        continueSessionBringUp();
+    });
 }
 
 void SpotifyClient::requestDeviceCode() {
@@ -196,6 +302,15 @@ void SpotifyClient::applyTokenResponse(const QJsonObject &obj) {
     if (!newRefresh.isEmpty()) {
         refreshToken = newRefresh;
         AppSettings::saveRefreshToken(refreshToken);
+    }
+
+    // The authorization-code (PKCE) token response carries the canonical
+    // username; the device-flow one does not. Capture it when present.
+    const QString tokenUsername = obj.value("username").toString();
+    if (!tokenUsername.isEmpty() && tokenUsername != username) {
+        username = tokenUsername;
+        AppSettings::saveUsername(username);
+        logMessage(QString("[like] signed in as %1").arg(username));
     }
 }
 
@@ -497,6 +612,7 @@ void SpotifyClient::registerConnectState() {
             connectStateRegistered = true;
             logMessage("[connect-state] Registered as an observer device. Listening for realtime pushes.");
             emit authComplete();
+            ensureUserProfile();
             handleClusterBytes(data, /*isUpdate=*/false);
         } else if (status == 401) {
             logMessage("[connect-state] Registration unauthorized; refreshing token.");
@@ -533,6 +649,21 @@ void SpotifyClient::handleClusterBytes(const QByteArray &protoBytes, bool isUpda
 
     const spotify::connectstate::PlayerState &ps = cluster.player_state();
     const bool isPlaying = ps.is_playing() && !ps.is_paused();
+
+    // Liked Songs plays under "spotify:user:<username>:collection", which is
+    // always the account's own collection — a reliable username source given
+    // that neither the device-flow token response nor spclient provide one.
+    if (username.isEmpty()) {
+        const QString contextUri = QString::fromStdString(ps.context_uri());
+        if (contextUri.startsWith("spotify:user:") && contextUri.section(':', 3) == "collection") {
+            username = contextUri.section(':', 2, 2);
+            if (!username.isEmpty()) {
+                AppSettings::saveUsername(username);
+                logMessage(QString("[like] username captured from the Liked Songs context: %1").arg(username));
+                ensureUserProfile();
+            }
+        }
+    }
 
     qint64 positionMs = ps.position_as_of_timestamp();
     if (isPlaying && ps.timestamp() > 0) {
@@ -622,7 +753,8 @@ constexpr int kMaxQueueTracks = 30;
 QString queueSignatureFor(const QList<UpcomingTrack> &tracks) {
     QString signature;
     for (const UpcomingTrack &t : tracks) {
-        signature += t.trackId + '|' + t.title + '|' + t.artist + '|' + t.artUrl + ';';
+        signature += t.trackId + '|' + t.title + '|' + t.artist + '|' + t.artUrl +
+                     '|' + (t.liked ? '1' : '0') + (t.smartShuffle ? '1' : '0') + ';';
     }
     return signature;
 }
@@ -662,6 +794,13 @@ void SpotifyClient::updateUpcomingQueue(const spotify::connectstate::PlayerState
         track.title = metaValue("title");
         track.artist = metaValue("artist_name");
         track.durationMs = metaValue("duration").toInt();
+        track.liked = isTrackLiked(track.trackId);
+
+        // Smart Shuffle interleaves recommendations into your context; the
+        // injected ones are tagged provider="enhanced_recommendation" (your
+        // own context tracks are not), which is exactly what Spotify's UI
+        // marks with the sparkle.
+        track.smartShuffle = metaValue("provider") == "enhanced_recommendation";
 
         // Small art is plenty for the thumbnail rows.
         QString image = metaValue("image_small_url");
@@ -963,6 +1102,159 @@ void SpotifyClient::nextTrack() {
 
 void SpotifyClient::prevTrack() {
     sendConnectCommand("skip_prev");
+}
+
+// ---------------------------------------------------------------------------
+// Liked songs (spclient collection service; the Web API 429s this client id)
+// ---------------------------------------------------------------------------
+
+bool SpotifyClient::isTrackLiked(const QString &trackId) const {
+    return likedTrackIds.contains(trackId);
+}
+
+void SpotifyClient::ensureUserProfile() {
+    if (username.isEmpty()) {
+        username = AppSettings::loadUsername();
+    }
+    if (username.isEmpty()) {
+        logMessage("[like] username unknown - play something from your Liked Songs once and it locks in");
+        return;
+    }
+    if (!likedSetRequested) {
+        likedSetRequested = true;
+        logMessage(QString("[like] loading Liked Songs for %1...").arg(username));
+        fetchLikedTracks(QString(), 0);
+    }
+}
+
+void SpotifyClient::fetchLikedTracks(const QString &paginationToken, int page) {
+    spotify::collection::PageRequest req;
+    req.set_username(username.toStdString());
+    req.set_set("collection");
+    if (!paginationToken.isEmpty()) {
+        req.set_pagination_token(paginationToken.toStdString());
+    }
+    req.set_limit(300);
+
+    std::string body;
+    if (!req.SerializeToString(&body)) {
+        return;
+    }
+
+    QNetworkRequest request = spclientRequest(QUrl(spclientBaseUrl + "/collection/v2/paging"));
+    request.setRawHeader("Accept", "application/vnd.collection-v2.spotify.proto");
+    request.setRawHeader("Content-Type", "application/vnd.collection-v2.spotify.proto");
+
+    QNetworkReply *reply = network->post(request, QByteArray(body.data(), int(body.size())));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, page]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
+
+        if (status == 401) {
+            likedSetRequested = false;
+            refreshAccessToken();
+            QTimer::singleShot(5000, this, [this]() { ensureUserProfile(); });
+            return;
+        }
+        if (status != 200) {
+            logMessage(QString("[like] loading Liked Songs failed (HTTP %1): %2")
+                           .arg(status).arg(QString::fromUtf8(data.left(200))));
+            return;
+        }
+
+        spotify::collection::PageResponse resp;
+        if (!resp.ParseFromArray(data.constData(), int(data.size()))) {
+            logMessage("[like] could not parse the Liked Songs page");
+            return;
+        }
+
+        for (const auto &item : resp.items()) {
+            const QString uri = QString::fromStdString(item.uri());
+            if (!item.is_removed() && uri.startsWith("spotify:track:")) {
+                likedTrackIds.insert(uri.section(':', 2, 2));
+            }
+        }
+
+        const QString nextToken = QString::fromStdString(resp.next_page_token());
+        if (!nextToken.isEmpty() && page < 200) {
+            fetchLikedTracks(nextToken, page + 1);
+        } else {
+            logMessage(QString("[like] Liked Songs loaded (%1 tracks)").arg(likedTrackIds.size()));
+            emit likedSongsLoaded();
+            // The queue was likely built before the liked set arrived; refresh
+            // its heart flags now that we know what's liked.
+            bool changed = false;
+            for (UpcomingTrack &t : lastQueue) {
+                const bool liked = isTrackLiked(t.trackId);
+                if (t.liked != liked) {
+                    t.liked = liked;
+                    changed = true;
+                }
+            }
+            if (changed) {
+                lastQueueSignature = queueSignatureFor(lastQueue);
+                emit queueChanged(lastQueue);
+            }
+        }
+    });
+}
+
+void SpotifyClient::toggleLikeCurrentTrack() {
+    if (lastTrackId.isEmpty() || accessToken.isEmpty()) {
+        emit trackLikeFinished(false, false);
+        return;
+    }
+    if (username.isEmpty()) {
+        logMessage("[like] username unknown - play something from your Liked Songs once and it locks in");
+        ensureUserProfile();
+        emit trackLikeFinished(false, isTrackLiked(lastTrackId));
+        return;
+    }
+
+    const QString trackId = lastTrackId;
+    const bool makeLiked = !likedTrackIds.contains(trackId);
+
+    spotify::collection::WriteRequest req;
+    req.set_username(username.toStdString());
+    req.set_set("collection");
+    auto *item = req.add_items();
+    item->set_uri(("spotify:track:" + trackId).toStdString());
+    item->set_added_at(makeLiked ? int(QDateTime::currentSecsSinceEpoch()) : 0);
+    item->set_is_removed(!makeLiked);
+    req.set_client_update_id(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
+
+    std::string body;
+    if (!req.SerializeToString(&body)) {
+        emit trackLikeFinished(false, !makeLiked);
+        return;
+    }
+
+    QNetworkRequest request = spclientRequest(QUrl(spclientBaseUrl + "/collection/v2/write"));
+    request.setRawHeader("Accept", "application/vnd.collection-v2.spotify.proto");
+    request.setRawHeader("Content-Type", "application/vnd.collection-v2.spotify.proto");
+
+    QNetworkReply *reply = network->post(request, QByteArray(body.data(), int(body.size())));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, trackId, makeLiked]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        reply->deleteLater();
+        if (status == 401) {
+            refreshAccessToken();
+        }
+
+        const bool success = status / 100 == 2;
+        if (success) {
+            if (makeLiked) {
+                likedTrackIds.insert(trackId);
+            } else {
+                likedTrackIds.remove(trackId);
+            }
+        }
+        logMessage(success
+            ? QString("[like] %1 %2 Liked Songs").arg(trackId, makeLiked ? "added to" : "removed from")
+            : QString("[like] updating %1 failed (HTTP %2)").arg(trackId).arg(status));
+        emit trackLikeFinished(success, likedTrackIds.contains(trackId));
+    });
 }
 
 void SpotifyClient::skipToQueuedTrack(const QString &trackId, const QString &uid) {

@@ -43,6 +43,7 @@ constexpr int kRowFadeInMs = 240;
 constexpr int kRowFadeOutMs = 180;
 constexpr int kRowEnterOffsetPx = 14;
 constexpr int kLockIconSize = 14;
+constexpr int kRowIconSize = 14;   // heart / sparkle badges on each queue row
 constexpr int kHoverMaxAlpha = 36; // out of 255, ~14%
 
 // Painted directly instead of via stylesheets: animating setStyleSheet
@@ -101,6 +102,34 @@ QPixmap lockPixmap(int size, const QColor &color) {
     p.setPen(Qt::NoPen);
     p.setBrush(color);
     p.drawRoundedRect(QRectF(size * 0.15, size * 0.44, size * 0.70, size * 0.48), size * 0.14, size * 0.14);
+    return pm;
+}
+
+// A four-point sparkle: a slim vertical/horizontal diamond, concave edges.
+void drawSparkle(QPainter &p, const QPointF &center, qreal radius) {
+    const qreal waist = radius * 0.28;
+    QPainterPath path;
+    path.moveTo(center.x(), center.y() - radius);
+    path.quadTo(center.x() + waist, center.y() - waist, center.x() + radius, center.y());
+    path.quadTo(center.x() + waist, center.y() + waist, center.x(), center.y() + radius);
+    path.quadTo(center.x() - waist, center.y() + waist, center.x() - radius, center.y());
+    path.quadTo(center.x() - waist, center.y() - waist, center.x(), center.y() - radius);
+    path.closeSubpath();
+    p.drawPath(path);
+}
+
+// Spotify's Smart Shuffle mark: one large sparkle with a smaller one tucked
+// to its lower-right.
+QPixmap sparklePixmap(int size, const QColor &color) {
+    QPixmap pm(size, size);
+    pm.fill(Qt::transparent);
+
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    drawSparkle(p, QPointF(size * 0.40, size * 0.42), size * 0.34);
+    drawSparkle(p, QPointF(size * 0.78, size * 0.76), size * 0.20);
     return pm;
 }
 
@@ -555,12 +584,23 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     textLayout->addWidget(row.titleLabel);
     textLayout->addWidget(row.artistLabel);
 
+    row.sparkleLabel = new QLabel(row.widget);
+    row.sparkleLabel->setFixedWidth(kRowIconSize);
+    row.sparkleLabel->setAlignment(Qt::AlignCenter);
+    row.sparkleLabel->hide();
+
+    row.likeLabel = new QLabel(row.widget);
+    row.likeLabel->setFixedWidth(kRowIconSize);
+    row.likeLabel->setAlignment(Qt::AlignCenter);
+
     row.durationLabel = new QLabel(row.widget);
     row.durationLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
 
     rowLayout->addWidget(row.indexLabel, 0);
     rowLayout->addWidget(row.artLabel, 0);
     rowLayout->addLayout(textLayout, 1);
+    rowLayout->addWidget(row.sparkleLabel, 0);
+    rowLayout->addWidget(row.likeLabel, 0);
     rowLayout->addWidget(row.durationLabel, 0);
 
     QGraphicsOpacityEffect *effect = new QGraphicsOpacityEffect(row.widget);
@@ -587,17 +627,29 @@ void QueueWindow::styleRowLabels(const Row &row) const {
     if (row.artLabel->pixmap(Qt::ReturnByValue).isNull()) {
         row.artLabel->setStyleSheet(QString("border: none; border-radius: 5px; background-color: #2c2c2c; color: %1; font-size: 16px;").arg(overlaySettings.accentColor));
     }
+    refreshRowBadges(row);
+}
+
+void QueueWindow::refreshRowBadges(const Row &row) const {
+    row.likeLabel->setText(row.liked ? "♥" : "♡");
+    row.likeLabel->setStyleSheet(QString("color: %1; font-size: 13px; border: none; background: transparent;")
+        .arg(row.liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
+    row.sparkleLabel->setPixmap(sparklePixmap(kRowIconSize, QColor(overlaySettings.accentColor)));
+    row.sparkleLabel->setVisible(row.smartShuffle);
 }
 
 void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int index) {
     row.fullTitle = track.title.isEmpty() ? QStringLiteral("Loading…") : track.title;
     row.fullArtist = track.artist.isEmpty() ? QStringLiteral("…") : track.artist;
+    row.liked = track.liked;
+    row.smartShuffle = track.smartShuffle;
     row.indexLabel->setText(QString::number(index + 1) + ".");
     row.durationLabel->setText(track.durationMs > 0 ? formatDuration(track.durationMs) : QString());
     if (row.artUrl != track.artUrl && !track.artUrl.isEmpty()) {
         row.artUrl = track.artUrl;
         setArtOnLabel(row.artLabel, row.artUrl, kArtSize);
     }
+    refreshRowBadges(row);
 }
 
 void QueueWindow::animateRowHover(Row &row, bool hovered) {
@@ -756,8 +808,9 @@ void QueueWindow::animateToContentHeight() {
 
 void QueueWindow::updateElides() {
     // Text budget: row width minus row padding, index column, album art,
-    // duration column and layout spacing. QLabel doesn't elide on its own.
-    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - 44 - 24);
+    // the heart/sparkle badges, duration column and layout spacing.
+    // QLabel doesn't elide on its own.
+    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - 2 * (kRowIconSize + 8) - 44 - 24);
 
     for (Row &row : rows) {
         row.titleLabel->setText(QFontMetrics(row.titleLabel->font()).elidedText(row.fullTitle, Qt::ElideRight, textBudget));

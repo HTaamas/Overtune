@@ -274,6 +274,18 @@ OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAcc
     trackLabel->setLabelStyleSheet(kTrackLabelStyle);
     trackLabel->setFixedHeight(24);
 
+    heartLabel = new QLabel(this);
+    heartLabel->setFixedWidth(20);
+    heartLabel->setFixedHeight(24);
+    heartLabel->setAlignment(Qt::AlignCenter);
+
+    // Title line: scrolling track name on the left, liked heart pinned right.
+    QHBoxLayout *titleRow = new QHBoxLayout();
+    titleRow->setContentsMargins(0, 0, 0, 0);
+    titleRow->setSpacing(6);
+    titleRow->addWidget(trackLabel, 1);
+    titleRow->addWidget(heartLabel, 0);
+
     artistLabel = new ScrollingLabel(this);
     artistLabel->setLabelStyleSheet(kArtistLabelStyle);
     artistLabel->setFixedHeight(20);
@@ -309,7 +321,7 @@ OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAcc
     progressArea->addWidget(songProgressBar);
     progressArea->addLayout(statusRow);
 
-    textLayout->addWidget(trackLabel);
+    textLayout->addLayout(titleRow);
     textLayout->addWidget(artistLabel);
     textLayout->addStretch(); // Move stretch here to push progress and volume to the bottom
     textLayout->addLayout(progressArea);
@@ -368,6 +380,13 @@ void OSDWindow::showVolume(int volume, const QString &track, const QString &arti
     } else {
         showOverlay();
     }
+}
+
+void OSDWindow::setLikedState(bool liked) {
+    likedNow = liked;
+    heartLabel->setText(liked ? "♥" : "♡");
+    heartLabel->setStyleSheet(QString("color: %1; font-size: 16px; border: none;")
+        .arg(liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
 }
 
 void OSDWindow::syncProgress(int progressMs, bool isPlaying, bool volumeControlSupported) {
@@ -496,6 +515,7 @@ void OSDWindow::refreshStyles() {
     trackLabel->setLabelStyleSheet(QString("color: %1; font-weight: bold; font-size: 16px; border: none;").arg(overlaySettings.primaryTextColor));
     artistLabel->setLabelStyleSheet(QString("color: %1; font-size: 13px; border: none;").arg(overlaySettings.secondaryTextColor));
     timeLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-family: monospace; border: none;").arg(overlaySettings.mutedTextColor));
+    setLikedState(likedNow);
     songProgressBar->setStyleSheet(makeProgressStyle(overlaySettings.borderColor, overlaySettings.progressBarColor, 2));
 
     if (albumArtLabel->pixmap(Qt::ReturnByValue).isNull()) {

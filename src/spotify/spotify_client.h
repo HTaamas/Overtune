@@ -15,6 +15,7 @@
 #include <QSet>
 
 class QWebSocket;
+class QTcpServer;
 
 namespace spotify::connectstate { class PlayerState; }
 
@@ -26,6 +27,8 @@ struct UpcomingTrack {
     QString artist;
     QString artUrl;
     int durationMs = 0;
+    bool liked = false;
+    bool smartShuffle = false; // injected by Smart Shuffle (recommendation)
 };
 
 // SpotifyClient talks to Spotify the way the librespot/go-librespot desktop
@@ -54,6 +57,9 @@ public:
     void prevTrack();
     // Jump directly to one entry of the upcoming queue.
     void skipToQueuedTrack(const QString &trackId, const QString &uid);
+    // Add/remove the currently playing song to/from the user's Liked Songs.
+    void toggleLikeCurrentTrack();
+    bool isTrackLiked(const QString &trackId) const;
 
     // Begin an interactive OAuth2 device-flow authorization (opens a browser).
     void startAuthorization();
@@ -64,6 +70,8 @@ signals:
     void trackChanged(int volume, const QString &track, const QString &artist, const QString &trackId, const QString &albumArtUrl, int progressMs, int durationMs, bool isPlaying, bool volumeControlSupported);
     void stateSynced(int volume, int progressMs, bool isPlaying, bool volumeControlSupported);
     void queueChanged(const QList<UpcomingTrack> &upcoming);
+    void trackLikeFinished(bool success, bool liked);
+    void likedSongsLoaded();
     void debugLog(const QString &logLine);
     void authComplete();
     // Fired when the device flow needs the user to authorize: url is the
@@ -77,7 +85,10 @@ private slots:
     void sendWebSocketPing();
 
 private:
-    // --- OAuth2 device flow ---
+    // --- OAuth2: PKCE (primary, yields the username) + device-flow fallback ---
+    void startPkceAuthorization();
+    void onAuthServerConnection();
+    void exchangeAuthCode(const QString &code);
     void requestDeviceCode();
     void pollDeviceToken();
     void applyTokenResponse(const QJsonObject &obj);
@@ -100,6 +111,10 @@ private:
     void updateUpcomingQueue(const spotify::connectstate::PlayerState &ps);
     void fetchUpcomingTrackDetails(const QStringList &trackIds);
     void clearUpcomingQueue();
+
+    // --- liked songs (spclient collection service) ---
+    void ensureUserProfile();
+    void fetchLikedTracks(const QString &paginationToken, int page);
 
     // --- helpers ---
     QNetworkRequest spclientRequest(const QUrl &url) const; // Authorization + Client-Token + Connection-Id
@@ -127,6 +142,10 @@ private:
     QTimer *devicePollTimer = nullptr;
     qint64 deviceFlowDeadlineMs = 0;
 
+    // PKCE flow
+    QTcpServer *authServer = nullptr;
+    QString codeVerifier;
+
     // connect-state / dealer
     QWebSocket *webSocket = nullptr;
     QTimer *pingTimer = nullptr;
@@ -143,6 +162,11 @@ private:
     bool lastIsPlaying = false;
     int pendingVolume = -1;
     QElapsedTimer pendingVolumeTimer;
+
+    // liked songs
+    QString username;
+    QSet<QString> likedTrackIds;
+    bool likedSetRequested = false;
 
     // upcoming queue (cluster next_tracks, metadata resolved lazily)
     QList<UpcomingTrack> lastQueue;

@@ -32,12 +32,14 @@ signals:
     void nextTrack();
     void prevTrack();
     void toggleQueueLockRequested();
+    void likeSongRequested();
 
 private:
 #ifdef _WIN32
     static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
     static HHOOK hHook;
     static bool queueLockChordDown;
+    static bool likeChordDown;
 #endif
 #ifdef __APPLE__
     static CGEventRef MacEventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon);

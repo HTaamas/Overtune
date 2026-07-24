@@ -57,6 +57,16 @@ void clearRefreshToken() {
     settings.remove("RefreshToken");
 }
 
+QString loadUsername() {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    return settings.value("Username").toString();
+}
+
+void saveUsername(const QString &username) {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    settings.setValue("Username", username);
+}
+
 QString loadOrCreateDeviceId() {
     QSettings settings("SpotifyVol", "SpotifyVol");
     QString deviceId = settings.value("DeviceId").toString();
@@ -79,6 +89,7 @@ KeybindSettings loadKeybindSettings() {
     config.fineStep = qBound(1, settings.value("fineStep", config.fineStep).toInt(), 25);
     config.useShiftForFineAdjust = settings.value("useShiftForFineAdjust", config.useShiftForFineAdjust).toBool();
     config.mainKey = settings.value("mainKey", config.mainKey).toString();
+    config.likeKey = settings.value("likeKey", config.likeKey).toString();
 
     settings.endGroup();
     return config;
@@ -91,6 +102,7 @@ void saveKeybindSettings(const KeybindSettings &config) {
     settings.setValue("fineStep", config.fineStep);
     settings.setValue("useShiftForFineAdjust", config.useShiftForFineAdjust);
     settings.setValue("mainKey", config.mainKey);
+    settings.setValue("likeKey", config.likeKey);
     settings.endGroup();
 }
 

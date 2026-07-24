@@ -164,6 +164,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fineStepSpin = new QSpinBox(this);
     fineStepSpin->setRange(1, 25);
     mainKeyEdit = new QLineEdit(this);
+    likeKeyEdit = new QLineEdit(this);
     useShiftFineAdjustCheck = new QCheckBox("Use Shift for fine adjustment", this);
     QLabel *mainKeyHint = new QLabel("Main key is a virtual key code (VK) value, e.g. 0x14 for Caps Lock (default) or 0x41 for 'A'. On macOS it is translated to the matching mac key (Caps Lock is supported).\nHold Shift with the main key to Skip, or Ctrl for Previous.", this);
     mainKeyHint->setWordWrap(true);
@@ -171,8 +172,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     keybindsLayout->addRow("Coarse step", coarseStepSpin);
     keybindsLayout->addRow("Fine step", fineStepSpin);
     keybindsLayout->addRow("Main key (VK)", mainKeyEdit);
+    keybindsLayout->addRow("Like key (VK, with Alt)", likeKeyEdit);
     keybindsLayout->addRow(QString(), useShiftFineAdjustCheck);
     keybindsLayout->addRow(QString(), mainKeyHint);
+    QLabel *likeKeyHint = new QLabel("Alt + the like key saves the current song to your Liked Songs (default 0x53 = 'S').", this);
+    likeKeyHint->setWordWrap(true);
+    keybindsLayout->addRow(QString(), likeKeyHint);
     tabs->addTab(keybindsTab, "Keybinds");
 
     layout->addWidget(tabs);
@@ -190,11 +195,19 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
 void SettingsDialog::showAuthorizationPrompt(const QString &url, const QString &code) {
     connectionValueLabel->setText("Waiting for authorization...");
-    helpTextLabel->setText(
-        QString("<b>Authorize SpotifyVol</b><br>"
-                "A browser window was opened to <a href=\"%1\">%1</a>.<br>"
-                "If it didn't open, visit that link and confirm the code <b>%2</b>.")
-            .arg(url, code));
+    if (code.isEmpty()) {
+        helpTextLabel->setText(
+            QString("<b>Authorize SpotifyVol</b><br>"
+                    "A browser window was opened. Approve access and you'll be connected automatically.<br>"
+                    "If it didn't open, <a href=\"%1\">click here</a>.")
+                .arg(url));
+    } else {
+        helpTextLabel->setText(
+            QString("<b>Authorize SpotifyVol</b><br>"
+                    "A browser window was opened to <a href=\"%1\">%1</a>.<br>"
+                    "If it didn't open, visit that link and confirm the code <b>%2</b>.")
+                .arg(url, code));
+    }
     helpTextLabel->setOpenExternalLinks(true);
 }
 
@@ -246,6 +259,7 @@ void SettingsDialog::setKeybindSettings(const KeybindSettings &settings) {
     coarseStepSpin->setValue(settings.coarseStep);
     fineStepSpin->setValue(settings.fineStep);
     mainKeyEdit->setText(settings.mainKey);
+    likeKeyEdit->setText(settings.likeKey);
     useShiftFineAdjustCheck->setChecked(settings.useShiftForFineAdjust);
 }
 
@@ -254,6 +268,7 @@ KeybindSettings SettingsDialog::keybindSettings() const {
     settings.coarseStep = coarseStepSpin->value();
     settings.fineStep = fineStepSpin->value();
     settings.mainKey = mainKeyEdit->text().trimmed();
+    settings.likeKey = likeKeyEdit->text().trimmed();
     settings.useShiftForFineAdjust = useShiftFineAdjustCheck->isChecked();
     return settings;
 }
@@ -303,6 +318,7 @@ void SettingsDialog::wireKeybindControls() {
     connect(coarseStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     connect(fineStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     connect(mainKeyEdit, &QLineEdit::textChanged, this, &SettingsDialog::keybindSettingsChanged);
+    connect(likeKeyEdit, &QLineEdit::textChanged, this, &SettingsDialog::keybindSettingsChanged);
     connect(useShiftFineAdjustCheck, &QCheckBox::toggled, this, &SettingsDialog::keybindSettingsChanged);
 }
 

@@ -22,6 +22,7 @@ struct KeybindSettings {
     int fineStep = 1;
     bool useShiftForFineAdjust = true;
     QString mainKey = "0x14"; // VK_CAPITAL (Caps Lock)
+    QString likeKey = "0x53"; // 'S'; pressed together with Alt to like the song
 };
 
 struct QueueSettings {
@@ -59,6 +60,10 @@ void clearRefreshToken();
 
 // Stable per-install Spotify Connect device id (40 hex chars). Generated once.
 QString loadOrCreateDeviceId();
+
+// Cached Spotify user id (fetched once; needed for collection writes).
+QString loadUsername();
+void saveUsername(const QString &username);
 }
 
 #endif // APP_SETTINGS_H

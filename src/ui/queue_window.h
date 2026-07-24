@@ -65,7 +65,11 @@ private:
         QLabel *artLabel = nullptr;
         QLabel *titleLabel = nullptr;
         QLabel *artistLabel = nullptr;
+        QLabel *sparkleLabel = nullptr;
+        QLabel *likeLabel = nullptr;
         QLabel *durationLabel = nullptr;
+        bool liked = false;
+        bool smartShuffle = false;
         QPointer<QPropertyAnimation> posAnimation;
         QPointer<QVariantAnimation> hoverAnimation;
     };
@@ -73,6 +77,7 @@ private:
     void refreshRows(bool animate);
     Row makeRow(const UpcomingTrack &track);
     void styleRowLabels(const Row &row) const;
+    void refreshRowBadges(const Row &row) const;
     void updateRowContent(Row &row, const UpcomingTrack &track, int index);
     void moveRowTo(Row &row, int index, bool animate);
     void fadeInRowAt(Row &row, int index, int direction);
