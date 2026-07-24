@@ -290,6 +290,11 @@ void QueueWindow::applyQueueSettings(const QueueSettings &settings) {
         dragging = false;
         resizingEdge = EdgeHit::None;
         setCursor(Qt::ArrowCursor);
+        // A click-through window never gets Leave events, so a row hovered at
+        // lock time would keep its highlight forever. Fade them all out now.
+        for (Row &row : rows) {
+            animateRowHover(row, false);
+        }
         // Changing a window flag hides the window; restore it without a fade.
         const bool wasVisible = isVisible();
         setWindowFlag(Qt::WindowTransparentForInput, queueSettings.locked);
@@ -427,7 +432,7 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
     // Inner padding keeps the content (index and duration especially) from
     // sitting flush against the hover highlight's rounded edges.
-    rowLayout->setContentsMargins(8, 0, 8, 0);
+    rowLayout->setContentsMargins(4, 0, 2, 4);
     rowLayout->setSpacing(8);
 
     row.indexLabel = new QLabel(row.widget);
