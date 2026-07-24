@@ -149,15 +149,23 @@ QueueWindow::QueueWindow(QWidget *parent) : QWidget(parent), network(new QNetwor
     containerWidget->setMouseTracking(true);
     containerWidget->installEventFilter(this);
 
-    nowArtLabel = new QLabel(containerWidget);
+    // The now-playing block lives in its own widget so a track change can
+    // slide the whole thing as one unit, mirroring the queue-row motion.
+    nowWidget = new QWidget(containerWidget);
+    nowWidget->setStyleSheet("background: transparent; border: none;");
+    QGraphicsOpacityEffect *nowEffect = new QGraphicsOpacityEffect(nowWidget);
+    nowEffect->setOpacity(1.0);
+    nowWidget->setGraphicsEffect(nowEffect);
+
+    nowArtLabel = new QLabel(nowWidget);
     nowArtLabel->setFixedSize(kNowArtSize, kNowArtSize);
     nowArtLabel->setAlignment(Qt::AlignCenter);
     nowArtLabel->setText("🎵");
-    nowTitleLabel = new QLabel("Nothing playing", containerWidget);
-    nowArtistLabel = new QLabel("Spotify", containerWidget);
-    nowTimeLabel = new QLabel(containerWidget);
+    nowTitleLabel = new QLabel("Nothing playing", nowWidget);
+    nowArtistLabel = new QLabel("Spotify", nowWidget);
+    nowTimeLabel = new QLabel(nowWidget);
     nowTimeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    nowProgressBar = new QProgressBar(containerWidget);
+    nowProgressBar = new QProgressBar(nowWidget);
     nowProgressBar->setTextVisible(false);
     nowProgressBar->setRange(0, 1);
     nowProgressBar->setValue(0);
@@ -196,8 +204,30 @@ void QueueWindow::setQueue(const QList<UpcomingTrack> &tracks) {
     refreshRows(/*animate=*/isVisible());
 }
 
-void QueueWindow::setNowPlaying(const QString &title, const QString &artist, const QString &artUrl,
-                                int progressMs, int durationMs, bool isPlaying) {
+void QueueWindow::setNowPlaying(const QString &trackId, const QString &title, const QString &artist,
+                                const QString &artUrl, int progressMs, int durationMs, bool isPlaying) {
+    // Only a real track change animates; metadata re-emits for the same
+    // track just refresh the text in place.
+    const bool isNewTrack = !trackId.isEmpty() && trackId != nowTrackId;
+    const bool shouldAnimate = isNewTrack && !nowTrackId.isEmpty() &&
+                               isVisible() && queueSettings.showNowPlaying;
+    QPixmap oldSnapshot;
+    bool fromList = false;
+    if (shouldAnimate) {
+        oldSnapshot = nowWidget->grab();
+        // `queue` still holds the pre-change list here (queueChanged arrives
+        // after trackChanged), so it tells us where the new song came from.
+        for (const UpcomingTrack &t : queue) {
+            if (t.trackId == trackId) {
+                fromList = true;
+                break;
+            }
+        }
+    }
+    if (!trackId.isEmpty()) {
+        nowTrackId = trackId;
+    }
+
     nowTitle = title.isEmpty() ? QStringLiteral("Loading...") : title;
     nowArtist = artist.isEmpty() ? QStringLiteral("Spotify") : artist;
     nowDurationMs = durationMs;
@@ -211,6 +241,77 @@ void QueueWindow::setNowPlaying(const QString &title, const QString &artist, con
     nowProgressBar->setRange(0, qMax(1, nowDurationMs));
     updateElides();
     updateNowPlayingTime();
+
+    if (shouldAnimate) {
+        animateNowSwap(fromList, oldSnapshot);
+    }
+}
+
+void QueueWindow::layoutNowContents() {
+    const int textX = kNowArtSize + 10;
+    const int textW = qMax(60, nowWidget->width() - textX);
+    const int lockReserve = lockIconVisible() ? kLockIconSize + 6 : 0;
+    nowArtLabel->move(0, (kNowHeight - kNowArtSize) / 2);
+    nowTitleLabel->setGeometry(textX, 4, qMax(60, textW - lockReserve), 18);
+    nowArtistLabel->setGeometry(textX, 22, textW, 15);
+    nowProgressBar->setGeometry(textX, 42, textW, 4);
+    nowTimeLabel->setGeometry(textX, 47, textW, 12);
+}
+
+void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
+    const QPoint target(kMarginX, kMarginTop);
+    const int offset = kRowEnterOffsetPx + 4;
+
+    // Ghost of the previous song drifts away in the direction of flow:
+    // up and out on skip, down toward the list on prev.
+    QLabel *ghost = new QLabel(containerWidget);
+    ghost->setAttribute(Qt::WA_TransparentForMouseEvents);
+    ghost->setStyleSheet("border: none; background: transparent;");
+    ghost->setPixmap(oldSnapshot);
+    ghost->setGeometry(nowWidget->geometry());
+    QGraphicsOpacityEffect *ghostEffect = new QGraphicsOpacityEffect(ghost);
+    ghostEffect->setOpacity(1.0);
+    ghost->setGraphicsEffect(ghostEffect);
+    ghost->show();
+
+    QPropertyAnimation *ghostSlide = new QPropertyAnimation(ghost, "pos", ghost);
+    ghostSlide->setDuration(kRowFadeOutMs);
+    ghostSlide->setEasingCurve(QEasingCurve::InQuad);
+    ghostSlide->setStartValue(ghost->pos());
+    ghostSlide->setEndValue(ghost->pos() + QPoint(0, upFlow ? -offset : offset));
+    ghostSlide->start(QAbstractAnimation::DeleteWhenStopped);
+
+    QPropertyAnimation *ghostFade = new QPropertyAnimation(ghostEffect, "opacity", ghost);
+    ghostFade->setDuration(kRowFadeOutMs);
+    ghostFade->setEasingCurve(QEasingCurve::InQuad);
+    ghostFade->setStartValue(1.0);
+    ghostFade->setEndValue(0.0);
+    connect(ghostFade, &QPropertyAnimation::finished, ghost, &QWidget::deleteLater);
+    ghostFade->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // The new song enters from the side it came from: below (the list) on
+    // skip, above (history) on prev.
+    if (nowSwapAnimation) {
+        nowSwapAnimation->stop();
+    }
+    nowWidget->move(target + QPoint(0, upFlow ? offset : -offset));
+    if (QGraphicsOpacityEffect *effect = opacityEffectOf(nowWidget)) {
+        effect->setOpacity(0.0);
+        QPropertyAnimation *fadeIn = new QPropertyAnimation(effect, "opacity", nowWidget);
+        fadeIn->setDuration(kRowFadeInMs);
+        fadeIn->setEasingCurve(QEasingCurve::OutQuad);
+        fadeIn->setStartValue(0.0);
+        fadeIn->setEndValue(1.0);
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    QPropertyAnimation *slideIn = new QPropertyAnimation(nowWidget, "pos", nowWidget);
+    slideIn->setDuration(kSlideMs);
+    slideIn->setEasingCurve(QEasingCurve::OutCubic);
+    slideIn->setStartValue(nowWidget->pos());
+    slideIn->setEndValue(target);
+    nowSwapAnimation = slideIn;
+    slideIn->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void QueueWindow::syncNowPlayingProgress(int progressMs, bool isPlaying) {
@@ -604,11 +705,7 @@ void QueueWindow::relayoutStatics() {
 
     // Now-playing block: art on the left, title/artist/progress to the right.
     const bool showNow = queueSettings.showNowPlaying;
-    nowArtLabel->setVisible(showNow);
-    nowTitleLabel->setVisible(showNow);
-    nowArtistLabel->setVisible(showNow);
-    nowProgressBar->setVisible(showNow);
-    nowTimeLabel->setVisible(showNow);
+    nowWidget->setVisible(showNow);
     // The lock badge occupies the window's top-right corner. Whatever shares
     // that line (the now-playing title, or the header when the now block is
     // hidden) gets its width trimmed so it can't run under the badge — this
@@ -619,13 +716,14 @@ void QueueWindow::relayoutStatics() {
     lockIconLabel->raise();
 
     if (showNow) {
-        const int textX = kMarginX + kNowArtSize + 10;
-        const int textW = qMax(60, width() - textX - kMarginX);
-        nowArtLabel->move(kMarginX, kMarginTop + (kNowHeight - kNowArtSize) / 2);
-        nowTitleLabel->setGeometry(textX, kMarginTop + 4, qMax(60, textW - lockReserve), 18);
-        nowArtistLabel->setGeometry(textX, kMarginTop + 22, textW, 15);
-        nowProgressBar->setGeometry(textX, kMarginTop + 42, textW, 4);
-        nowTimeLabel->setGeometry(textX, kMarginTop + 47, textW, 12);
+        // Don't yank the block around mid slide-in; the animation owns its
+        // position and always lands on this same target.
+        if (!nowSwapAnimation) {
+            nowWidget->setGeometry(kMarginX, kMarginTop, rowWidth(), kNowHeight);
+        } else {
+            nowWidget->resize(rowWidth(), kNowHeight);
+        }
+        layoutNowContents();
     }
 
     headerLabel->setGeometry(kMarginX, kMarginTop + nowBlockHeight(), rowWidth() - (showNow ? 0 : lockReserve), headerHeight());

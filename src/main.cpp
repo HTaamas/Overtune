@@ -183,7 +183,7 @@ int main(int argc, char *argv[]) {
         updateProgressBaseline(progressMs, isPlaying);
         currentDuration = durationMs;
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
-        queueWindow.setNowPlaying(currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
+        queueWindow.setNowPlaying(trackId, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
         tray.updateTrackInfo(currentTrack, currentArtist);
     });
 

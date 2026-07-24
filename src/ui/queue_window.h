@@ -32,8 +32,8 @@ public:
 
     void setQueue(const QList<UpcomingTrack> &tracks);
     // Mirrors the OSD's now-playing info (no volume): shown above "UP NEXT".
-    void setNowPlaying(const QString &title, const QString &artist, const QString &artUrl,
-                       int progressMs, int durationMs, bool isPlaying);
+    void setNowPlaying(const QString &trackId, const QString &title, const QString &artist,
+                       const QString &artUrl, int progressMs, int durationMs, bool isPlaying);
     void syncNowPlayingProgress(int progressMs, bool isPlaying);
     void applyOverlaySettings(const OverlaySettings &settings);
     void applyQueueSettings(const QueueSettings &settings);
@@ -93,6 +93,8 @@ private:
     void setArtOnLabel(QLabel *artLabel, const QString &artUrl, int size);
     int estimatedNowProgress() const;
     void updateNowPlayingTime();
+    void layoutNowContents();
+    void animateNowSwap(bool upFlow, const QPixmap &oldSnapshot);
     bool lockIconVisible() const;
     EdgeHit edgeHitTest(const QPoint &windowPos) const;
     int rowIndexAt(const QPoint &windowPos) const;
@@ -103,6 +105,7 @@ private:
     QWidget *containerWidget;
     QLabel *headerLabel;
     QLabel *emptyLabel;
+    QWidget *nowWidget;
     QLabel *nowArtLabel;
     QLabel *nowTitleLabel;
     QLabel *nowArtistLabel;
@@ -120,9 +123,11 @@ private:
     OverlaySettings overlaySettings;
     QueueSettings queueSettings;
 
+    QString nowTrackId;
     QString nowTitle;
     QString nowArtist;
     QString nowArtUrl;
+    QPointer<QPropertyAnimation> nowSwapAnimation;
     int nowProgressMs = 0;
     int nowDurationMs = 0;
     bool nowIsPlaying = false;
