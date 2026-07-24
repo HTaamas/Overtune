@@ -373,6 +373,15 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     // Hover moves stop at the row widget (they don't bubble up like clicks
     // do), so the click affordance has to live on the row itself.
     row.widget->setCursor(Qt::PointingHandCursor);
+    row.widget->installEventFilter(this);
+
+    // Sits behind the labels (created first = lowest); fades in on hover.
+    row.hoverBg = new QWidget(row.widget);
+    row.hoverBg->setGeometry(row.widget->rect());
+    QGraphicsOpacityEffect *hoverEffect = new QGraphicsOpacityEffect(row.hoverBg);
+    hoverEffect->setOpacity(0.0);
+    row.hoverBg->setGraphicsEffect(hoverEffect);
+    row.hoverBg->lower();
 
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
     rowLayout->setContentsMargins(0, 0, 0, 0);
@@ -417,6 +426,9 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
 }
 
 void QueueWindow::styleRowLabels(const Row &row) const {
+    const QColor accent(overlaySettings.accentColor);
+    row.hoverBg->setStyleSheet(QString("background-color: rgba(%1,%2,%3,14%); border: none; border-radius: 6px;")
+        .arg(accent.red()).arg(accent.green()).arg(accent.blue()));
     row.indexLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
     row.titleLabel->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
     row.artistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
@@ -435,6 +447,24 @@ void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int ind
         row.artUrl = track.artUrl;
         setArtOnLabel(row.artLabel, row.artUrl, kArtSize);
     }
+}
+
+void QueueWindow::animateRowHover(Row &row, bool hovered) {
+    QGraphicsOpacityEffect *effect = opacityEffectOf(row.hoverBg);
+    if (!effect) {
+        return;
+    }
+    if (row.hoverAnimation) {
+        row.hoverAnimation->stop();
+    }
+
+    QPropertyAnimation *fade = new QPropertyAnimation(effect, "opacity", row.hoverBg);
+    fade->setDuration(hovered ? 150 : 220);
+    fade->setEasingCurve(QEasingCurve::OutQuad);
+    fade->setStartValue(effect->opacity());
+    fade->setEndValue(hovered ? 1.0 : 0.0);
+    row.hoverAnimation = fade;
+    fade->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void QueueWindow::moveRowTo(Row &row, int index, bool animate) {
@@ -547,6 +577,7 @@ void QueueWindow::relayoutStatics() {
     emptyLabel->setGeometry(kMarginX, rowY(0), rowWidth(), emptyLabel->sizeHint().height());
     for (Row &row : rows) {
         row.widget->setFixedSize(rowWidth(), kRowHeight);
+        row.hoverBg->setGeometry(row.widget->rect());
     }
 }
 
@@ -705,6 +736,15 @@ bool QueueWindow::eventFilter(QObject *watched, QEvent *event) {
     if (watched == containerWidget && event->type() == QEvent::MouseMove) {
         QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
         updateHoverCursor(containerWidget->mapTo(this, mouseEvent->position().toPoint()));
+    }
+
+    if (event->type() == QEvent::Enter || event->type() == QEvent::Leave) {
+        for (Row &row : rows) {
+            if (row.widget == watched) {
+                animateRowHover(row, event->type() == QEvent::Enter);
+                break;
+            }
+        }
     }
     return QWidget::eventFilter(watched, event);
 }

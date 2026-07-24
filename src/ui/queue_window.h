@@ -58,12 +58,14 @@ private:
         QString fullTitle;
         QString fullArtist;
         QWidget *widget = nullptr;
+        QWidget *hoverBg = nullptr;
         QLabel *indexLabel = nullptr;
         QLabel *artLabel = nullptr;
         QLabel *titleLabel = nullptr;
         QLabel *artistLabel = nullptr;
         QLabel *durationLabel = nullptr;
         QPointer<QPropertyAnimation> posAnimation;
+        QPointer<QPropertyAnimation> hoverAnimation;
     };
 
     void refreshRows(bool animate);
@@ -72,6 +74,7 @@ private:
     void updateRowContent(Row &row, const UpcomingTrack &track, int index);
     void moveRowTo(Row &row, int index, bool animate);
     void fadeInRowAt(Row &row, int index, int direction);
+    void animateRowHover(Row &row, bool hovered);
     void discardRow(const Row &row, bool animate, int direction);
 
     int headerHeight() const;
