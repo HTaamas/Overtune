@@ -59,7 +59,8 @@ private:
         QString fullTitle;
         QString fullArtist;
         QWidget *widget = nullptr;
-        QWidget *hoverBg = nullptr;
+        QWidget *hoverBg = nullptr;   // HoverHighlight; painted, not styled
+        bool hovered = false;
         QLabel *indexLabel = nullptr;
         QLabel *artLabel = nullptr;
         QLabel *titleLabel = nullptr;
