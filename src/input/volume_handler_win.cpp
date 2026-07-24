@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 HHOOK VolumeHandler::hHook = nullptr;
+bool VolumeHandler::queueLockChordDown = false;
 
 VolumeHandler::VolumeHandler(QObject *parent) : QObject(parent) {
     instance = this;
@@ -84,7 +85,21 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
 
     if (nCode == HC_ACTION) {
         KBDLLHOOKSTRUCT *pKey = reinterpret_cast<KBDLLHOOKSTRUCT *>(lParam);
+        if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
+            if (pKey->vkCode == 'U') {
+                queueLockChordDown = false;
+            }
+        }
+
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            if (pKey->vkCode == 'U' && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0) {
+                if (!queueLockChordDown && instance) {
+                    queueLockChordDown = true;
+                    emit instance->toggleQueueLockRequested();
+                }
+                return 1;
+            }
+
             if (pKey->vkCode == instance->keybindSettings.mainKey.toInt(nullptr, 16)) {
                 if (instance) {
                     if (isShift && isCtrl) {

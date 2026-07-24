@@ -124,6 +124,33 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     overlayLayout->addRow("Hide delay", hideDurationSpin);
     tabs->addTab(overlayTab, "Overlay");
 
+    QWidget *queueTab = new QWidget(this);
+    QFormLayout *queueLayout = new QFormLayout(queueTab);
+    queueLayout->setContentsMargins(12, 12, 12, 12);
+    queueLayout->setSpacing(10);
+
+    queueEnabledCheck = new QCheckBox("Show the Up Next window", this);
+    queueShowNowPlayingCheck = new QCheckBox("Show the current song at the top", this);
+    queueLockedCheck = new QCheckBox("Lock the window (click-through)", this);
+    queueShowLockIconCheck = new QCheckBox("Show a lock icon while locked", this);
+    queueMaxSongsSpin = new QSpinBox(this);
+    queueMaxSongsSpin->setRange(1, 30);
+    queueMaxSongsSpin->setSuffix(" songs");
+    queueOpacitySpin = new QSpinBox(this);
+    queueOpacitySpin->setRange(20, 100);
+    queueOpacitySpin->setSuffix("%");
+    QLabel *queueHint = new QLabel("The Up Next window stays on top and never auto-hides. Drag it anywhere with the mouse, resize it from the left/right edge — position and size are remembered. Locking makes it click-through so it can't be moved or block clicks; toggle the lock any time with Alt+U.", this);
+    queueHint->setWordWrap(true);
+
+    queueLayout->addRow(QString(), queueEnabledCheck);
+    queueLayout->addRow(QString(), queueShowNowPlayingCheck);
+    queueLayout->addRow(QString(), queueLockedCheck);
+    queueLayout->addRow(QString(), queueShowLockIconCheck);
+    queueLayout->addRow("Songs shown", queueMaxSongsSpin);
+    queueLayout->addRow("Opacity", queueOpacitySpin);
+    queueLayout->addRow(QString(), queueHint);
+    tabs->addTab(queueTab, "Up Next");
+
     QWidget *keybindsTab = new QWidget(this);
     QFormLayout *keybindsLayout = new QFormLayout(keybindsTab);
     keybindsLayout->setContentsMargins(12, 12, 12, 12);
@@ -149,6 +176,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     wireOverlayControls();
     wireKeybindControls();
+    wireQueueControls();
 
     QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::hide);
@@ -227,6 +255,32 @@ KeybindSettings SettingsDialog::keybindSettings() const {
     return settings;
 }
 
+void SettingsDialog::setQueueSettings(const QueueSettings &settings) {
+    queueEnabledCheck->setChecked(settings.enabled);
+    queueShowNowPlayingCheck->setChecked(settings.showNowPlaying);
+    queueLockedCheck->setChecked(settings.locked);
+    queueShowLockIconCheck->setChecked(settings.showLockIcon);
+    queueMaxSongsSpin->setValue(settings.maxSongs);
+    queueOpacitySpin->setValue(settings.opacityPercent);
+    queueWindowX = settings.windowX;
+    queueWindowY = settings.windowY;
+    queueWindowWidth = settings.windowWidth;
+}
+
+QueueSettings SettingsDialog::queueSettings() const {
+    QueueSettings settings;
+    settings.enabled = queueEnabledCheck->isChecked();
+    settings.showNowPlaying = queueShowNowPlayingCheck->isChecked();
+    settings.locked = queueLockedCheck->isChecked();
+    settings.showLockIcon = queueShowLockIconCheck->isChecked();
+    settings.maxSongs = queueMaxSongsSpin->value();
+    settings.opacityPercent = queueOpacitySpin->value();
+    settings.windowX = queueWindowX;
+    settings.windowY = queueWindowY;
+    settings.windowWidth = queueWindowWidth;
+    return settings;
+}
+
 void SettingsDialog::wireOverlayControls() {
     connect(backgroundColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(backgroundColorEdit, backgroundColorPreview); emit overlaySettingsChanged(); });
     connect(borderColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(borderColorEdit, borderColorPreview); emit overlaySettingsChanged(); });
@@ -244,6 +298,15 @@ void SettingsDialog::wireKeybindControls() {
     connect(fineStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     connect(mainKeyEdit, &QLineEdit::textChanged, this, &SettingsDialog::keybindSettingsChanged);
     connect(useShiftFineAdjustCheck, &QCheckBox::toggled, this, &SettingsDialog::keybindSettingsChanged);
+}
+
+void SettingsDialog::wireQueueControls() {
+    connect(queueEnabledCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
+    connect(queueShowNowPlayingCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
+    connect(queueLockedCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
+    connect(queueShowLockIconCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
+    connect(queueMaxSongsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
+    connect(queueOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
 }
 
 QWidget *SettingsDialog::createColorFieldRow(QLineEdit *edit, QLabel *preview, QWidget *parent) {

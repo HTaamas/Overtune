@@ -11,8 +11,22 @@
 #include <QUrlQuery>
 #include <QDesktopServices>
 #include <QElapsedTimer>
+#include <QHash>
+#include <QSet>
 
 class QWebSocket;
+
+namespace spotify::connectstate { class PlayerState; }
+
+// One entry of the upcoming-songs queue shown in the "Up Next" window.
+struct UpcomingTrack {
+    QString trackId;
+    QString uid;    // queue-entry id; lets skip-to target one exact entry
+    QString title;
+    QString artist;
+    QString artUrl;
+    int durationMs = 0;
+};
 
 // SpotifyClient talks to Spotify the way the librespot/go-librespot desktop
 // clients do, using only the Web backend (no audio streaming):
@@ -38,6 +52,8 @@ public:
     void togglePlayPause();
     void nextTrack();
     void prevTrack();
+    // Jump directly to one entry of the upcoming queue.
+    void skipToQueuedTrack(const QString &trackId, const QString &uid);
 
     // Begin an interactive OAuth2 device-flow authorization (opens a browser).
     void startAuthorization();
@@ -47,6 +63,7 @@ public:
 signals:
     void trackChanged(int volume, const QString &track, const QString &artist, const QString &trackId, const QString &albumArtUrl, int progressMs, int durationMs, bool isPlaying, bool volumeControlSupported);
     void stateSynced(int volume, int progressMs, bool isPlaying, bool volumeControlSupported);
+    void queueChanged(const QList<UpcomingTrack> &upcoming);
     void debugLog(const QString &logLine);
     void authComplete();
     // Fired when the device flow needs the user to authorize: url is the
@@ -77,7 +94,12 @@ private:
     void registerConnectState();
     void handleClusterBytes(const QByteArray &protoBytes, bool isUpdate);
     void fetchTrackDetails(const QString &trackId);
-    void sendConnectCommand(const QString &endpoint);
+    void sendConnectCommand(const QString &endpoint, const QJsonObject &extraCommandFields = {});
+
+    // --- upcoming queue ---
+    void updateUpcomingQueue(const spotify::connectstate::PlayerState &ps);
+    void fetchUpcomingTrackDetails(const QStringList &trackIds);
+    void clearUpcomingQueue();
 
     // --- helpers ---
     QNetworkRequest spclientRequest(const QUrl &url) const; // Authorization + Client-Token + Connection-Id
@@ -121,6 +143,12 @@ private:
     bool lastIsPlaying = false;
     int pendingVolume = -1;
     QElapsedTimer pendingVolumeTimer;
+
+    // upcoming queue (cluster next_tracks, metadata resolved lazily)
+    QList<UpcomingTrack> lastQueue;
+    QString lastQueueSignature;
+    QHash<QString, UpcomingTrack> queueMetaCache;
+    QSet<QString> pendingQueueLookups;
 };
 
 #endif // SPOTIFY_CLIENT_H

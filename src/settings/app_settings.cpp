@@ -4,6 +4,7 @@
 namespace {
 constexpr auto kOverlayGroup = "overlay";
 constexpr auto kKeybindsGroup = "keybinds";
+constexpr auto kQueueGroup = "queue";
 }
 
 namespace AppSettings {
@@ -90,6 +91,43 @@ void saveKeybindSettings(const KeybindSettings &config) {
     settings.setValue("fineStep", config.fineStep);
     settings.setValue("useShiftForFineAdjust", config.useShiftForFineAdjust);
     settings.setValue("mainKey", config.mainKey);
+    settings.endGroup();
+}
+
+QueueSettings loadQueueSettings() {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    settings.beginGroup(kQueueGroup);
+
+    QueueSettings config;
+    config.enabled = settings.value("enabled", config.enabled).toBool();
+    config.showNowPlaying = settings.value("showNowPlaying", config.showNowPlaying).toBool();
+    config.locked = settings.value("locked", config.locked).toBool();
+    config.showLockIcon = settings.value("showLockIcon", config.showLockIcon).toBool();
+    config.maxSongs = qBound(1, settings.value("maxSongs", config.maxSongs).toInt(), 30);
+    config.opacityPercent = qBound(20, settings.value("opacityPercent", config.opacityPercent).toInt(), 100);
+    config.windowX = settings.value("windowX", config.windowX).toInt();
+    config.windowY = settings.value("windowY", config.windowY).toInt();
+    config.windowWidth = settings.value("windowWidth", config.windowWidth).toInt();
+    if (config.windowWidth != -1) {
+        config.windowWidth = qBound(240, config.windowWidth, 900);
+    }
+
+    settings.endGroup();
+    return config;
+}
+
+void saveQueueSettings(const QueueSettings &config) {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    settings.beginGroup(kQueueGroup);
+    settings.setValue("enabled", config.enabled);
+    settings.setValue("showNowPlaying", config.showNowPlaying);
+    settings.setValue("locked", config.locked);
+    settings.setValue("showLockIcon", config.showLockIcon);
+    settings.setValue("maxSongs", config.maxSongs);
+    settings.setValue("opacityPercent", config.opacityPercent);
+    settings.setValue("windowX", config.windowX);
+    settings.setValue("windowY", config.windowY);
+    settings.setValue("windowWidth", config.windowWidth);
     settings.endGroup();
 }
 }

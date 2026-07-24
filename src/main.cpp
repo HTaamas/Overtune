@@ -5,6 +5,7 @@
 #include "input/volume_handler.h"
 #include "settings/app_settings.h"
 #include "ui/settings_dialog.h"
+#include "ui/queue_window.h"
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QIcon>
@@ -13,6 +14,7 @@
 #include <exception>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QSignalBlocker>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -129,10 +131,14 @@ int main(int argc, char *argv[]) {
     TrayManager tray;
     VolumeHandler volHandler;
     SettingsDialog settingsDialog;
+    QueueWindow queueWindow;
     settingsDialog.setOverlaySettings(AppSettings::loadOverlaySettings());
     settingsDialog.setKeybindSettings(AppSettings::loadKeybindSettings());
+    settingsDialog.setQueueSettings(AppSettings::loadQueueSettings());
     osd.applyOverlaySettings(settingsDialog.overlaySettings());
     volHandler.applyKeybindSettings(settingsDialog.keybindSettings());
+    queueWindow.applyOverlaySettings(settingsDialog.overlaySettings());
+    queueWindow.applyQueueSettings(settingsDialog.queueSettings());
 
     int currentVolume = 50;
     QString currentTrack = "Loading...";
@@ -177,6 +183,7 @@ int main(int argc, char *argv[]) {
         updateProgressBaseline(progressMs, isPlaying);
         currentDuration = durationMs;
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
+        queueWindow.setNowPlaying(currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
         tray.updateTrackInfo(currentTrack, currentArtist);
     });
 
@@ -205,6 +212,45 @@ int main(int argc, char *argv[]) {
         const OverlaySettings settings = settingsDialog.overlaySettings();
         AppSettings::saveOverlaySettings(settings);
         osd.applyOverlaySettings(settings);
+        queueWindow.applyOverlaySettings(settings);
+    });
+
+    QObject::connect(&settingsDialog, &SettingsDialog::queueSettingsChanged, [&]() {
+        const QueueSettings settings = settingsDialog.queueSettings();
+        AppSettings::saveQueueSettings(settings);
+        queueWindow.applyQueueSettings(settings);
+    });
+
+    QObject::connect(&spotify, &SpotifyClient::queueChanged, &queueWindow, &QueueWindow::setQueue);
+
+    QObject::connect(&queueWindow, &QueueWindow::trackActivated, [&](const QString &trackId, const QString &uid) {
+        spotify.skipToQueuedTrack(trackId, uid);
+    });
+
+    QObject::connect(&queueWindow, &QueueWindow::windowMoved, [&](const QPoint &topLeft) {
+        QueueSettings settings = settingsDialog.queueSettings();
+        settings.windowX = topLeft.x();
+        settings.windowY = topLeft.y();
+        AppSettings::saveQueueSettings(settings);
+        const QSignalBlocker blocker(&settingsDialog);
+        settingsDialog.setQueueSettings(settings);
+    });
+
+    QObject::connect(&volHandler, &VolumeHandler::toggleQueueLockRequested, [&]() {
+        QueueSettings settings = settingsDialog.queueSettings();
+        settings.locked = !settings.locked;
+        AppSettings::saveQueueSettings(settings);
+        queueWindow.applyQueueSettings(settings);
+        const QSignalBlocker blocker(&settingsDialog);
+        settingsDialog.setQueueSettings(settings);
+    });
+
+    QObject::connect(&queueWindow, &QueueWindow::windowResized, [&](int windowWidth) {
+        QueueSettings settings = settingsDialog.queueSettings();
+        settings.windowWidth = windowWidth;
+        AppSettings::saveQueueSettings(settings);
+        const QSignalBlocker blocker(&settingsDialog);
+        settingsDialog.setQueueSettings(settings);
     });
 
     QObject::connect(&settingsDialog, &SettingsDialog::keybindSettingsChanged, [&]() {
@@ -219,6 +265,7 @@ int main(int argc, char *argv[]) {
         currentVolumeControlSupported = volumeControlSupported;
         updateProgressBaseline(progressMs, isPlaying);
         osd.syncProgress(progressMs, isPlaying, volumeControlSupported);
+        queueWindow.syncNowPlayingProgress(progressMs, isPlaying);
 
         if (playbackStateChanged) {
             osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, progressMs, currentDuration, currentIsPlaying, currentVolumeControlSupported);
