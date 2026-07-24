@@ -370,6 +370,9 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     row.widget = new QWidget(containerWidget);
     row.widget->setFixedSize(rowWidth(), kRowHeight);
     row.widget->setStyleSheet("background: transparent; border: none;");
+    // Hover moves stop at the row widget (they don't bubble up like clicks
+    // do), so the click affordance has to live on the row itself.
+    row.widget->setCursor(Qt::PointingHandCursor);
 
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
     rowLayout->setContentsMargins(0, 0, 0, 0);
