@@ -11,6 +11,7 @@ class TrayManager : public QObject {
 public:
     explicit TrayManager(QObject *parent = nullptr);
     void updateTrackInfo(const QString &track, const QString &artist);
+    void showNotification(const QString &title, const QString &message);
 
 signals:
     void settingsRequested();

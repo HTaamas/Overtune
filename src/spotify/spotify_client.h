@@ -70,6 +70,8 @@ public:
 signals:
     void trackChanged(int volume, const QString &track, const QString &artist, const QString &trackId, const QString &albumArtUrl, int progressMs, int durationMs, bool isPlaying, bool volumeControlSupported);
     void stateSynced(int volume, int progressMs, bool isPlaying, bool volumeControlSupported);
+    // The stored session is no longer usable; the user must reconnect Spotify.
+    void reauthorizationRequired();
     void queueChanged(const QList<UpcomingTrack> &upcoming);
     void trackLikeFinished(bool success, bool liked);
     void likedSongsLoaded();
@@ -94,6 +96,7 @@ private:
     void pollDeviceToken();
     void applyTokenResponse(const QJsonObject &obj);
     void refreshAccessToken();
+    void scheduleProactiveRefresh(int expiresInSeconds);
     bool accessTokenExpired() const;
 
     // --- session bring-up ---
@@ -130,6 +133,9 @@ private:
     QString accessToken;
     QString refreshToken;
     qint64 accessTokenExpiryMs = 0;
+    bool refreshInFlight = false;      // guards against concurrent refreshes
+    bool reauthPromptSent = false;     // so the reconnect notice fires once
+    QTimer *tokenRefreshTimer = nullptr; // proactive refresh + transient retry
     QString clientToken;
     qint64 clientTokenExpiryMs = 0;
 

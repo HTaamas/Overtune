@@ -77,6 +77,12 @@ SpotifyClient::SpotifyClient(QObject *parent)
     devicePollTimer = new QTimer(this);
     connect(devicePollTimer, &QTimer::timeout, this, &SpotifyClient::pollDeviceToken);
 
+    // Refreshes the access token before it expires (and retries transient
+    // refresh failures), so the session never lapses while the app runs.
+    tokenRefreshTimer = new QTimer(this);
+    tokenRefreshTimer->setSingleShot(true);
+    connect(tokenRefreshTimer, &QTimer::timeout, this, &SpotifyClient::refreshAccessToken);
+
     webSocket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     connect(webSocket, &QWebSocket::connected, this, &SpotifyClient::onWebSocketConnected);
     connect(webSocket, &QWebSocket::disconnected, this, &SpotifyClient::onWebSocketDisconnected);
@@ -297,6 +303,8 @@ void SpotifyClient::applyTokenResponse(const QJsonObject &obj) {
     accessToken = obj.value("access_token").toString();
     const int expiresIn = obj.value("expires_in").toInt(3600);
     accessTokenExpiryMs = QDateTime::currentMSecsSinceEpoch() + qint64(expiresIn) * 1000;
+    reauthPromptSent = false;
+    scheduleProactiveRefresh(expiresIn);
 
     const QString newRefresh = obj.value("refresh_token").toString();
     if (!newRefresh.isEmpty()) {
@@ -324,11 +332,32 @@ void SpotifyClient::resumeSession() {
     refreshAccessToken();
 }
 
+void SpotifyClient::scheduleProactiveRefresh(int expiresInSeconds) {
+    if (!tokenRefreshTimer) {
+        return;
+    }
+    // Refresh two minutes before expiry (but no sooner than 30s out), so the
+    // token is renewed while still valid instead of lapsing mid-session.
+    const int refreshInSec = qMax(30, expiresInSeconds - 120);
+    tokenRefreshTimer->start(refreshInSec * 1000);
+}
+
 void SpotifyClient::refreshAccessToken() {
     if (refreshToken.isEmpty()) {
         logMessage("Cannot refresh: no refresh token. Please re-authorize (Connect Spotify).");
+        if (!reauthPromptSent) {
+            reauthPromptSent = true;
+            emit reauthorizationRequired();
+        }
         return;
     }
+    // A burst of 401s (or a proactive refresh coinciding with one) must not
+    // fire multiple refreshes: Spotify rotates the refresh token, so a second
+    // concurrent refresh would use an already-invalidated token and fail.
+    if (refreshInFlight) {
+        return;
+    }
+    refreshInFlight = true;
 
     QUrlQuery form;
     form.addQueryItem("grant_type", "refresh_token");
@@ -341,18 +370,41 @@ void SpotifyClient::refreshAccessToken() {
 
     QNetworkReply *reply = network->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        refreshInFlight = false;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool netError = reply->error() != QNetworkReply::NoError;
         const QByteArray data = reply->readAll();
         reply->deleteLater();
 
         const QJsonObject obj = QJsonDocument::fromJson(data).object();
-        if (obj.value("access_token").toString().isEmpty()) {
-            logMessage("Token refresh failed; the stored session is no longer valid. Please Connect Spotify again.");
-            AppSettings::clearRefreshToken();
-            refreshToken.clear();
+        if (!obj.value("access_token").toString().isEmpty()) {
+            applyTokenResponse(obj);
+            // Only bring the whole session up when it isn't already live; a
+            // proactive/mid-session refresh just needs the new token in hand.
+            if (webSocket->state() != QAbstractSocket::ConnectedState || !connectStateRegistered) {
+                continueSessionBringUp();
+            }
             return;
         }
-        applyTokenResponse(obj);
-        continueSessionBringUp();
+
+        // Distinguish a dead refresh token from a transient hiccup. Only
+        // "invalid_grant" means the credential is truly gone — anything else
+        // (network drop, 5xx, rate limit) is retried without wiping it.
+        const QString err = obj.value("error").toString();
+        if (err == "invalid_grant") {
+            logMessage("Token refresh rejected (invalid_grant); the stored session is gone. Please Connect Spotify again.");
+            AppSettings::clearRefreshToken();
+            refreshToken.clear();
+            if (!reauthPromptSent) {
+                reauthPromptSent = true;
+                emit reauthorizationRequired();
+            }
+            return;
+        }
+
+        logMessage(QString("Token refresh failed transiently (HTTP %1%2); retrying in 30s.")
+                       .arg(status).arg(netError ? ", network error" : ""));
+        tokenRefreshTimer->start(30 * 1000);
     });
 }
 

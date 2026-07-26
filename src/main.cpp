@@ -211,6 +211,12 @@ int main(int argc, char *argv[]) {
         settingsDialog.setAuthenticated(true);
     });
 
+    QObject::connect(&spotify, &SpotifyClient::reauthorizationRequired, [&]() {
+        settingsDialog.setAuthenticated(false);
+        tray.showNotification("SpotifyVol - reconnect needed",
+                              "Your Spotify session expired. Open Settings and click Connect Spotify to reconnect.");
+    });
+
     QObject::connect(&settingsDialog, &SettingsDialog::overlaySettingsChanged, [&]() {
         const OverlaySettings settings = settingsDialog.overlaySettings();
         AppSettings::saveOverlaySettings(settings);

@@ -84,6 +84,12 @@ void TrayManager::updateTrackInfo(const QString &track, const QString &artist) {
     trackAction->setText("Current Playing: " + track + " - " + artist);
 }
 
+void TrayManager::showNotification(const QString &title, const QString &message) {
+    if (trayIcon && QSystemTrayIcon::supportsMessages()) {
+        trayIcon->showMessage(title, message, QSystemTrayIcon::Warning, 10000);
+    }
+}
+
 void TrayManager::handleTrayActivation(QSystemTrayIcon::ActivationReason reason) {
     #if defined(_WIN32) || defined(__linux__)
     if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
