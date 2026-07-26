@@ -631,11 +631,15 @@ void QueueWindow::styleRowLabels(const Row &row) const {
 }
 
 void QueueWindow::refreshRowBadges(const Row &row) const {
+    // One badge slot: the sparkle stands in for a Smart Shuffle recommendation
+    // (which can't be liked), but a liked heart always takes precedence.
+    const bool showSparkle = row.smartShuffle && !row.liked;
+    row.sparkleLabel->setPixmap(sparklePixmap(kRowIconSize, QColor(overlaySettings.accentColor)));
+    row.sparkleLabel->setVisible(showSparkle);
     row.likeLabel->setText(row.liked ? "♥" : "♡");
     row.likeLabel->setStyleSheet(QString("color: %1; font-size: 13px; border: none; background: transparent;")
         .arg(row.liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
-    row.sparkleLabel->setPixmap(sparklePixmap(kRowIconSize, QColor(overlaySettings.accentColor)));
-    row.sparkleLabel->setVisible(row.smartShuffle);
+    row.likeLabel->setVisible(!showSparkle);
 }
 
 void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int index) {
@@ -808,9 +812,9 @@ void QueueWindow::animateToContentHeight() {
 
 void QueueWindow::updateElides() {
     // Text budget: row width minus row padding, index column, album art,
-    // the heart/sparkle badges, duration column and layout spacing.
+    // the single heart/sparkle badge, duration column and layout spacing.
     // QLabel doesn't elide on its own.
-    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - 2 * (kRowIconSize + 8) - 44 - 24);
+    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - (kRowIconSize + 8) - 44 - 24);
 
     for (Row &row : rows) {
         row.titleLabel->setText(QFontMetrics(row.titleLabel->font()).elidedText(row.fullTitle, Qt::ElideRight, textBudget));
