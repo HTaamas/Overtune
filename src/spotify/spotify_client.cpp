@@ -643,7 +643,10 @@ void SpotifyClient::registerConnectState() {
     cap->set_supports_playlist_v2(true);
     cap->set_supports_set_backend_metadata(true);
     cap->set_supports_set_options_command(true);
-    cap->set_needs_full_player_state(false);
+    // Ask the active device to push its full player state, so next_tracks
+    // carries the complete upcoming list (in shuffle order when shuffled)
+    // instead of a ~2-track window.
+    cap->set_needs_full_player_state(true);
 
     std::string body;
     if (!req.SerializeToString(&body)) {
@@ -829,6 +832,9 @@ void SpotifyClient::clearUpcomingQueue() {
 }
 
 void SpotifyClient::updateUpcomingQueue(const spotify::connectstate::PlayerState &ps) {
+    // The active device pushes its full upcoming list (in shuffle order when
+    // shuffled) thanks to needs_full_player_state, so next_tracks is all we
+    // need — no playlist resolution.
     QList<UpcomingTrack> upcoming;
     QStringList unresolved;
 
@@ -840,28 +846,22 @@ void SpotifyClient::updateUpcomingQueue(const spotify::connectstate::PlayerState
         if (!uri.startsWith("spotify:track:")) {
             continue; // skip delimiters, ads, episodes...
         }
-
-        UpcomingTrack track;
-        track.trackId = uri.section(':', 2, 2);
-        track.uid = QString::fromStdString(pt.uid());
-
         const auto &meta = pt.metadata();
         auto metaValue = [&meta](const char *key) -> QString {
             auto it = meta.find(key);
             return it != meta.end() ? QString::fromStdString(it->second) : QString();
         };
+
+        UpcomingTrack track;
+        track.trackId = uri.section(':', 2, 2);
+        track.uid = QString::fromStdString(pt.uid());
         track.title = metaValue("title");
         track.artist = metaValue("artist_name");
         track.durationMs = metaValue("duration").toInt();
         track.liked = isTrackLiked(track.trackId);
-
-        // Smart Shuffle interleaves recommendations into your context; the
-        // injected ones are tagged provider="enhanced_recommendation" (your
-        // own context tracks are not), which is exactly what Spotify's UI
-        // marks with the sparkle.
+        // Smart Shuffle recommendations are tagged provider="enhanced_recommendation".
         track.smartShuffle = metaValue("provider") == "enhanced_recommendation";
 
-        // Small art is plenty for the thumbnail rows.
         QString image = metaValue("image_small_url");
         if (image.isEmpty()) image = metaValue("image_url");
         if (image.isEmpty()) image = metaValue("image_large_url");
