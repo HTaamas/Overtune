@@ -3,6 +3,8 @@
 
 #include <QPushButton>
 #include <QKeyEvent>
+#include <QContextMenuEvent>
+#include <QInputDialog>
 #include <functional>
 
 #ifdef _WIN32
@@ -18,12 +20,16 @@
 // A button that captures a single physical key press and stores its virtual
 // key code (as a "0xNN" hex string, matching the format the keybind system
 // expects). It shows a friendly name — "Caps Lock", "A" — instead of forcing
-// the user to know raw VK codes. Click it, then press any key.
+// the user to know raw VK codes. Click it, then press any key. Right-click to
+// type a code by hand, which is the escape hatch for keys the OS won't report
+// normally (e.g. a Caps Lock disabled via the registry, which surfaces as
+// 0xFF but still fires 0x14 in the global hook).
 class KeyCaptureButton : public QPushButton {
 public:
     explicit KeyCaptureButton(QWidget *parent = nullptr) : QPushButton(parent) {
         setCheckable(true);
         setFocusPolicy(Qt::StrongFocus);
+        setToolTip("Click, then press a key. Right-click to type a VK code by hand.");
         connect(this, &QPushButton::clicked, this, [this](bool checked) {
             capturing = checked;
             refreshText();
@@ -80,8 +86,9 @@ protected:
         }
 #endif
         if (vk == 0 || vk == 0xFF) {
-            // Genuinely unbindable (e.g. an Fn key handled in hardware).
-            setText(QStringLiteral("Unsupported key — try another"));
+            // The OS won't report a usable virtual key (e.g. a registry-
+            // disabled Caps Lock). Point the user at manual entry.
+            setText(QStringLiteral("Not detected — right-click to type a code"));
             event->accept();
             return; // stay in capture mode for another attempt
         }
@@ -105,6 +112,33 @@ protected:
             refreshText();
         }
         QPushButton::focusOutEvent(event);
+    }
+
+    void contextMenuEvent(QContextMenuEvent *event) override {
+        // Manual entry escape hatch: type the VK code in hex.
+        if (capturing) {
+            capturing = false;
+            setChecked(false);
+            releaseKeyboard();
+        }
+        bool ok = false;
+        const QString current = vkHex.isEmpty() ? QStringLiteral("0x14") : vkHex;
+        const QString text = QInputDialog::getText(
+            this, QStringLiteral("Enter key code"),
+            QStringLiteral("Virtual-key code in hex (e.g. 0x14 = Caps Lock, 0x53 = S):"),
+            QLineEdit::Normal, current, &ok);
+        if (ok) {
+            bool parsed = false;
+            const uint v = text.trimmed().toUInt(&parsed, 16);
+            if (parsed && v > 0 && v <= 0xFF) {
+                vkHex = QString("0x%1").arg(v, 2, 16, QChar('0')).toUpper().replace("0X", "0x");
+                if (onChanged) {
+                    onChanged();
+                }
+            }
+        }
+        refreshText();
+        event->accept();
     }
 
 private:

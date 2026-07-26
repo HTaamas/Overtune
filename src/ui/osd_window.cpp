@@ -391,6 +391,7 @@ OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAcc
     speakerIconLabel = new QLabel(this);
     speakerIconLabel->setFixedSize(14, 14);
     speakerIconLabel->setAlignment(Qt::AlignCenter);
+    speakerIconLabel->setStyleSheet("border: none; background: transparent;");
 
     songProgressBar = new QProgressBar(this);
     songProgressBar->setTextVisible(false);

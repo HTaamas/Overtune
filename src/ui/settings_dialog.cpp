@@ -228,7 +228,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     mainKeyButton = new KeyCaptureButton(this);
     likeKeyButton = new KeyCaptureButton(this);
     useShiftFineAdjustCheck = new QCheckBox("Use Shift for fine adjustment", this);
-    QLabel *mainKeyHint = new QLabel("Click a key field, then press the key you want. The main key toggles volume control; hold Shift with it to Skip, or Ctrl for Previous. (Caps Lock is the default and works on macOS too.)", this);
+    QLabel *mainKeyHint = new QLabel("Click a key field, then press the key you want (or right-click to type a code by hand). The main key toggles volume control; hold Shift with it to Skip, or Ctrl for Previous. (Caps Lock is the default and works on macOS too.)", this);
     mainKeyHint->setWordWrap(true);
 
     keybindsLayout->addRow("Coarse step", coarseStepSpin);
