@@ -706,6 +706,13 @@ void SpotifyClient::handleClusterBytes(const QByteArray &protoBytes, bool isUpda
     const QString trackUri = QString::fromStdString(ps.track().uri());
     const QString trackId = trackUri.startsWith("spotify:track:") ? trackUri.section(':', 2, 2) : QString();
 
+    // Is the currently playing track a Smart Shuffle recommendation?
+    {
+        const auto &curMeta = ps.track().metadata();
+        const auto it = curMeta.find("provider");
+        lastTrackSmartShuffle = it != curMeta.end() && it->second == "enhanced_recommendation";
+    }
+
     if (!trackId.isEmpty() && trackId != lastTrackId) {
         lastTrackId = trackId;
 

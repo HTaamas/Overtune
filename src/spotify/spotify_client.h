@@ -60,6 +60,7 @@ public:
     // Add/remove the currently playing song to/from the user's Liked Songs.
     void toggleLikeCurrentTrack();
     bool isTrackLiked(const QString &trackId) const;
+    bool isCurrentTrackSmartShuffle() const { return lastTrackSmartShuffle; }
 
     // Begin an interactive OAuth2 device-flow authorization (opens a browser).
     void startAuthorization();
@@ -155,6 +156,7 @@ private:
 
     // cached playback state (volume kept 0-100)
     QString lastTrackId;
+    bool lastTrackSmartShuffle = false;
     bool volumeControlSupported = true;
     int currentVolume = 50;
     int lastProgressMs = 0;

@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
         currentVolumeControlSupported = volumeControlSupported;
         updateProgressBaseline(progressMs, isPlaying);
         currentDuration = durationMs;
-        osd.setLikedState(spotify.isTrackLiked(trackId));
+        osd.setLikedState(spotify.isTrackLiked(trackId), spotify.isCurrentTrackSmartShuffle());
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
         queueWindow.setNowPlaying(trackId, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
         tray.updateTrackInfo(currentTrack, currentArtist);
@@ -244,12 +244,12 @@ int main(int argc, char *argv[]) {
     });
 
     QObject::connect(&spotify, &SpotifyClient::likedSongsLoaded, [&]() {
-        osd.setLikedState(spotify.isTrackLiked(currentTrackId));
+        osd.setLikedState(spotify.isTrackLiked(currentTrackId), spotify.isCurrentTrackSmartShuffle());
     });
 
     QObject::connect(&spotify, &SpotifyClient::trackLikeFinished, [&](bool success, bool liked) {
         if (success) {
-            osd.setLikedState(liked);
+            osd.setLikedState(liked, spotify.isCurrentTrackSmartShuffle());
         }
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
     });

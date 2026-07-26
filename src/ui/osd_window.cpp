@@ -38,6 +38,32 @@ QString makeProgressStyle(const QString &backgroundColor, const QString &chunkCo
     ).arg(backgroundColor).arg(radius).arg(chunkColor);
 }
 
+// A four-point sparkle: a slim diamond with concave edges.
+void drawSparkle(QPainter &p, const QPointF &center, qreal radius) {
+    const qreal waist = radius * 0.28;
+    QPainterPath path;
+    path.moveTo(center.x(), center.y() - radius);
+    path.quadTo(center.x() + waist, center.y() - waist, center.x() + radius, center.y());
+    path.quadTo(center.x() + waist, center.y() + waist, center.x(), center.y() + radius);
+    path.quadTo(center.x() - waist, center.y() + waist, center.x() - radius, center.y());
+    path.quadTo(center.x() - waist, center.y() - waist, center.x(), center.y() - radius);
+    path.closeSubpath();
+    p.drawPath(path);
+}
+
+// Spotify's Smart Shuffle mark: a large sparkle with a smaller one below-right.
+QPixmap sparklePixmap(int size, const QColor &color) {
+    QPixmap pm(size, size);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    drawSparkle(p, QPointF(size * 0.40, size * 0.42), size * 0.34);
+    drawSparkle(p, QPointF(size * 0.78, size * 0.76), size * 0.20);
+    return pm;
+}
+
 QPixmap makeRoundedPixmap(const QPixmap &source, int targetSize, qreal radius) {
     QPixmap scaled = source.scaled(targetSize, targetSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
 
@@ -382,8 +408,19 @@ void OSDWindow::showVolume(int volume, const QString &track, const QString &arti
     }
 }
 
-void OSDWindow::setLikedState(bool liked) {
+void OSDWindow::setLikedState(bool liked, bool smartShuffle) {
     likedNow = liked;
+    smartShuffleNow = smartShuffle;
+
+    // A Smart Shuffle recommendation can't be liked, so its sparkle stands in
+    // for the heart; a liked heart always takes precedence.
+    if (!liked && smartShuffle) {
+        heartLabel->setText("");
+        heartLabel->setStyleSheet("border: none; background: transparent;");
+        heartLabel->setPixmap(sparklePixmap(16, QColor(overlaySettings.accentColor)));
+        return;
+    }
+    heartLabel->setPixmap(QPixmap());
     heartLabel->setText(liked ? "♥" : "♡");
     heartLabel->setStyleSheet(QString("color: %1; font-size: 16px; border: none;")
         .arg(liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
@@ -515,7 +552,7 @@ void OSDWindow::refreshStyles() {
     trackLabel->setLabelStyleSheet(QString("color: %1; font-weight: bold; font-size: 16px; border: none;").arg(overlaySettings.primaryTextColor));
     artistLabel->setLabelStyleSheet(QString("color: %1; font-size: 13px; border: none;").arg(overlaySettings.secondaryTextColor));
     timeLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-family: monospace; border: none;").arg(overlaySettings.mutedTextColor));
-    setLikedState(likedNow);
+    setLikedState(likedNow, smartShuffleNow);
     songProgressBar->setStyleSheet(makeProgressStyle(overlaySettings.borderColor, overlaySettings.progressBarColor, 2));
 
     if (albumArtLabel->pixmap(Qt::ReturnByValue).isNull()) {

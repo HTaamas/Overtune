@@ -22,9 +22,10 @@ public:
     explicit OSDWindow(QWidget *parent = nullptr);
     void showVolume(int volume, const QString &track, const QString &artist, const QString &albumArtUrl = "", int progressMs = 0, int durationMs = 0, bool isPlaying = false, bool volumeControlSupported = true);
     void syncProgress(int progressMs, bool isPlaying, bool volumeControlSupported);
-    // Accent-colored heart in the status row: filled when the current song
-    // is in Liked Songs, outlined when it isn't.
-    void setLikedState(bool liked);
+    // Badge on the title line: a filled/outlined accent heart for the liked
+    // state, or Spotify's sparkle when the song is a Smart Shuffle
+    // recommendation (which can't be liked). Liked always wins.
+    void setLikedState(bool liked, bool smartShuffle = false);
     void applyOverlaySettings(const OverlaySettings &settings);
 
 private slots:
@@ -43,6 +44,7 @@ private:
     QLabel *volumeLabel;
     QLabel *heartLabel;
     bool likedNow = false;
+    bool smartShuffleNow = false;
     QProgressBar *volumeBar;
     QProgressBar *songProgressBar;
     QLabel *pauseOverlay;
