@@ -5,6 +5,16 @@
 #include <QKeyEvent>
 #include <functional>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 // A button that captures a single physical key press and stores its virtual
 // key code (as a "0xNN" hex string, matching the format the keybind system
 // expects). It shows a friendly name — "Caps Lock", "A" — instead of forcing
@@ -54,16 +64,35 @@ protected:
             return;
         }
 
-        const quint32 vk = event->nativeVirtualKey();
-        if (vk != 0) {
-            vkHex = QString("0x%1").arg(vk, 2, 16, QChar('0')).toUpper().replace("0X", "0x");
-            capturing = false;
-            setChecked(false);
-            releaseKeyboard();
-            refreshText();
-            if (onChanged) {
-                onChanged();
+        quint32 vk = event->nativeVirtualKey();
+#ifdef _WIN32
+        // Some keys report 0 or 0xFF (a "no single virtual key" sentinel) as
+        // their virtual key; resolve those from the hardware scan code so the
+        // global hook, which matches on the real VK, can actually see them.
+        if (vk == 0 || vk == 0xFF) {
+            const quint32 scanCode = event->nativeScanCode();
+            if (scanCode != 0) {
+                const UINT mapped = MapVirtualKeyW(scanCode, MAPVK_VSC_TO_VK_EX);
+                if (mapped != 0) {
+                    vk = mapped;
+                }
             }
+        }
+#endif
+        if (vk == 0 || vk == 0xFF) {
+            // Genuinely unbindable (e.g. an Fn key handled in hardware).
+            setText(QStringLiteral("Unsupported key — try another"));
+            event->accept();
+            return; // stay in capture mode for another attempt
+        }
+
+        vkHex = QString("0x%1").arg(vk, 2, 16, QChar('0')).toUpper().replace("0X", "0x");
+        capturing = false;
+        setChecked(false);
+        releaseKeyboard();
+        refreshText();
+        if (onChanged) {
+            onChanged();
         }
         event->accept();
     }

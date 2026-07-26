@@ -66,34 +66,36 @@ QString artPlaceholderStyle(const QString &bg, const QString &accent) {
         .arg(bg, accent);
 }
 
-// A small speaker glyph so the volume bar is unmistakably the volume control.
+// A clean speaker glyph so the volume bar is unmistakably the volume control:
+// a filled square magnet + triangular cone, with two sound waves.
 QPixmap speakerPixmap(int size, const QColor &color) {
     QPixmap pm(size, size);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
+    const qreal s = size;
+
+    // Body (magnet block) + cone, drawn as one solid shape.
     p.setPen(Qt::NoPen);
     p.setBrush(color);
+    const qreal boxL = s * 0.10, boxR = s * 0.30;
+    const qreal boxT = s * 0.40, boxB = s * 0.60;
+    p.drawRoundedRect(QRectF(boxL, boxT, boxR - boxL, boxB - boxT), s * 0.04, s * 0.04);
+    QPainterPath cone;
+    cone.moveTo(boxR - s * 0.02, boxT - s * 0.01);
+    cone.lineTo(s * 0.52, s * 0.18);
+    cone.lineTo(s * 0.52, s * 0.82);
+    cone.lineTo(boxR - s * 0.02, boxB + s * 0.01);
+    cone.closeSubpath();
+    p.drawPath(cone);
 
-    // Speaker body: a small rectangle with a triangular cone.
-    const qreal s = size;
-    QPainterPath body;
-    body.moveTo(s * 0.12, s * 0.38);
-    body.lineTo(s * 0.30, s * 0.38);
-    body.lineTo(s * 0.50, s * 0.20);
-    body.lineTo(s * 0.50, s * 0.80);
-    body.lineTo(s * 0.30, s * 0.62);
-    body.lineTo(s * 0.12, s * 0.62);
-    body.closeSubpath();
-    p.drawPath(body);
-
-    // Two sound arcs.
-    QPen pen(color, qMax(1.2, s * 0.07));
+    // Two concentric sound waves.
+    QPen pen(color, qMax(1.2, s * 0.085));
     pen.setCapStyle(Qt::RoundCap);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
-    p.drawArc(QRectF(s * 0.40, s * 0.30, s * 0.30, s * 0.40), -60 * 16, 120 * 16);
-    p.drawArc(QRectF(s * 0.40, s * 0.20, s * 0.50, s * 0.60), -55 * 16, 110 * 16);
+    p.drawArc(QRectF(s * 0.52, s * 0.36, s * 0.18, s * 0.28), -75 * 16, 150 * 16);
+    p.drawArc(QRectF(s * 0.52, s * 0.24, s * 0.34, s * 0.52), -62 * 16, 124 * 16);
     return pm;
 }
 
