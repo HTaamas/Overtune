@@ -18,11 +18,31 @@
 #include <QVariantAnimation>
 #include <QVBoxLayout>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #ifdef __APPLE__
 void applyMacOverlayWindowBehavior(QWidget *widget);
 #endif
 
 namespace {
+// Honors the OS "reduce motion" / "show animations" accessibility setting.
+bool reducedMotion() {
+    static const bool reduced = []() {
+#ifdef _WIN32
+        BOOL animEnabled = TRUE;
+        if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animEnabled, 0)) {
+            return !animEnabled;
+        }
+#endif
+        return false;
+    }();
+    return reduced;
+}
+// Collapses an animation duration to 0 (instant) when reduced motion is on.
+int animMs(int ms) { return reducedMotion() ? 0 : ms; }
+
 constexpr int kArtSize = 36;
 constexpr int kNowArtSize = 48;
 constexpr int kNowHeight = 58;
@@ -33,7 +53,7 @@ constexpr int kMarginX = 15;
 constexpr int kMarginTop = 12;
 constexpr int kMarginBottom = 12;
 constexpr int kHeaderGap = 8;
-constexpr int kResizeGripPx = 6;
+constexpr int kResizeGripPx = 8;
 constexpr int kMinWidth = 240;
 constexpr int kMaxWidth = 900;
 constexpr int kFadeMs = 220;
@@ -212,11 +232,11 @@ QueueWindow::QueueWindow(QWidget *parent) : QWidget(parent), network(new QNetwor
     emptyLabel = new QLabel("Queue is empty", containerWidget);
 
     geometryAnimation = new QPropertyAnimation(this, "geometry", this);
-    geometryAnimation->setDuration(kHeightAnimMs);
+    geometryAnimation->setDuration(animMs(kHeightAnimMs));
     geometryAnimation->setEasingCurve(QEasingCurve::OutCubic);
 
     fadeAnimation = new QPropertyAnimation(this, "windowOpacity", this);
-    fadeAnimation->setDuration(kFadeMs);
+    fadeAnimation->setDuration(animMs(kFadeMs));
     fadeAnimation->setEasingCurve(QEasingCurve::InOutQuad);
 
     overlaySettings = AppSettings::loadOverlaySettings();
@@ -304,14 +324,14 @@ void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
     ghost->show();
 
     QPropertyAnimation *ghostSlide = new QPropertyAnimation(ghost, "pos", ghost);
-    ghostSlide->setDuration(kRowFadeOutMs);
+    ghostSlide->setDuration(animMs(kRowFadeOutMs));
     ghostSlide->setEasingCurve(QEasingCurve::InQuad);
     ghostSlide->setStartValue(ghost->pos());
     ghostSlide->setEndValue(ghost->pos() + QPoint(0, upFlow ? -offset : offset));
     ghostSlide->start(QAbstractAnimation::DeleteWhenStopped);
 
     QPropertyAnimation *ghostFade = new QPropertyAnimation(ghostEffect, "opacity", ghost);
-    ghostFade->setDuration(kRowFadeOutMs);
+    ghostFade->setDuration(animMs(kRowFadeOutMs));
     ghostFade->setEasingCurve(QEasingCurve::InQuad);
     ghostFade->setStartValue(1.0);
     ghostFade->setEndValue(0.0);
@@ -327,7 +347,7 @@ void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
     if (QGraphicsOpacityEffect *effect = opacityEffectOf(nowWidget)) {
         effect->setOpacity(0.0);
         QPropertyAnimation *fadeIn = new QPropertyAnimation(effect, "opacity", nowWidget);
-        fadeIn->setDuration(kRowFadeInMs);
+        fadeIn->setDuration(animMs(kRowFadeInMs));
         fadeIn->setEasingCurve(QEasingCurve::OutQuad);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
@@ -335,7 +355,7 @@ void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
     }
 
     QPropertyAnimation *slideIn = new QPropertyAnimation(nowWidget, "pos", nowWidget);
-    slideIn->setDuration(kSlideMs);
+    slideIn->setDuration(animMs(kSlideMs));
     slideIn->setEasingCurve(QEasingCurve::OutCubic);
     slideIn->setStartValue(nowWidget->pos());
     slideIn->setEndValue(target);
@@ -395,8 +415,8 @@ void QueueWindow::applyOverlaySettings(const OverlaySettings &settings) {
         "QProgressBar::chunk { background-color: %2; border-radius: 2px; }")
         .arg(overlaySettings.borderColor, overlaySettings.progressBarColor));
     if (nowArtLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        nowArtLabel->setStyleSheet(QString("border: none; border-radius: 6px; background-color: #2c2c2c; color: %1; font-size: 22px;")
-            .arg(overlaySettings.accentColor));
+        nowArtLabel->setStyleSheet(QString("border: none; border-radius: 6px; background-color: %1; color: %2; font-size: 22px;")
+            .arg(overlaySettings.borderColor, overlaySettings.accentColor));
     }
     lockIconLabel->setPixmap(lockPixmap(kLockIconSize, QColor(overlaySettings.accentColor)));
     for (const Row &row : rows) {
@@ -625,7 +645,7 @@ void QueueWindow::styleRowLabels(const Row &row) const {
     row.artistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
     row.durationLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
     if (row.artLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        row.artLabel->setStyleSheet(QString("border: none; border-radius: 5px; background-color: #2c2c2c; color: %1; font-size: 16px;").arg(overlaySettings.accentColor));
+        row.artLabel->setStyleSheet(QString("border: none; border-radius: 6px; background-color: %1; color: %2; font-size: 16px;").arg(overlaySettings.borderColor, overlaySettings.accentColor));
     }
     refreshRowBadges(row);
 }
@@ -690,7 +710,7 @@ void QueueWindow::moveRowTo(Row &row, int index, bool animate) {
     }
 
     QPropertyAnimation *slide = new QPropertyAnimation(row.widget, "pos", row.widget);
-    slide->setDuration(kSlideMs);
+    slide->setDuration(animMs(kSlideMs));
     slide->setEasingCurve(QEasingCurve::OutCubic);
     slide->setStartValue(row.widget->pos());
     slide->setEndValue(target);
@@ -708,7 +728,7 @@ void QueueWindow::fadeInRowAt(Row &row, int index, int direction) {
     if (QGraphicsOpacityEffect *effect = opacityEffectOf(row.widget)) {
         effect->setOpacity(0.0);
         QPropertyAnimation *fade = new QPropertyAnimation(effect, "opacity", row.widget);
-        fade->setDuration(kRowFadeInMs);
+        fade->setDuration(animMs(kRowFadeInMs));
         fade->setEasingCurve(QEasingCurve::OutQuad);
         fade->setStartValue(0.0);
         fade->setEndValue(1.0);
@@ -716,7 +736,7 @@ void QueueWindow::fadeInRowAt(Row &row, int index, int direction) {
     }
 
     QPropertyAnimation *slide = new QPropertyAnimation(row.widget, "pos", row.widget);
-    slide->setDuration(kSlideMs);
+    slide->setDuration(animMs(kSlideMs));
     slide->setEasingCurve(QEasingCurve::OutCubic);
     slide->setStartValue(row.widget->pos());
     slide->setEndValue(target);
@@ -737,7 +757,7 @@ void QueueWindow::discardRow(const Row &row, bool animate, int direction) {
     // Removed rows keep drifting the way the list is moving and dissolve.
     if (QGraphicsOpacityEffect *effect = opacityEffectOf(widget)) {
         QPropertyAnimation *fade = new QPropertyAnimation(effect, "opacity", widget);
-        fade->setDuration(kRowFadeOutMs);
+        fade->setDuration(animMs(kRowFadeOutMs));
         fade->setEasingCurve(QEasingCurve::InQuad);
         fade->setStartValue(effect->opacity());
         fade->setEndValue(0.0);
@@ -749,7 +769,7 @@ void QueueWindow::discardRow(const Row &row, bool animate, int direction) {
     }
 
     QPropertyAnimation *slide = new QPropertyAnimation(widget, "pos", widget);
-    slide->setDuration(kRowFadeOutMs);
+    slide->setDuration(animMs(kRowFadeOutMs));
     slide->setEasingCurve(QEasingCurve::InQuad);
     slide->setStartValue(widget->pos());
     slide->setEndValue(widget->pos() + QPoint(0, direction * kRowEnterOffsetPx));
@@ -836,7 +856,7 @@ void QueueWindow::setArtOnLabel(QLabel *artLabel, const QString &artUrl, int siz
     const auto cached = artCache.constFind(cacheKey);
     if (cached != artCache.constEnd()) {
         artLabel->setText("");
-        artLabel->setStyleSheet("border: none; border-radius: 5px; background: transparent;");
+        artLabel->setStyleSheet("border: none; border-radius: 6px; background: transparent;");
         artLabel->setPixmap(*cached);
         return;
     }
@@ -856,13 +876,13 @@ void QueueWindow::setArtOnLabel(QLabel *artLabel, const QString &artUrl, int siz
         if (artCache.size() > 150) {
             artCache.clear();
         }
-        const QPixmap rounded = roundedThumbnail(pixmap, size, 5.0);
+        const QPixmap rounded = roundedThumbnail(pixmap, size, 6.0);
         artCache.insert(cacheKey, rounded);
 
         // The row may have been discarded while the download was in flight.
         if (target) {
             target->setText("");
-            target->setStyleSheet("border: none; border-radius: 5px; background: transparent;");
+            target->setStyleSheet("border: none; border-radius: 6px; background: transparent;");
             target->setPixmap(rounded);
         }
     });

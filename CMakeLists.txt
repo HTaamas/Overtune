@@ -119,6 +119,7 @@ set(SOURCES
     src/ui/tray_manager.h
     src/ui/settings_dialog.h
     src/ui/settings_dialog.cpp
+    src/ui/key_capture_button.h
     src/ui/queue_window.h
     src/ui/queue_window.cpp
     src/input/volume_handler.h

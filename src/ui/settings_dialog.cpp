@@ -1,5 +1,6 @@
 #include "settings_dialog.h"
 #include "spotify/spotify_client.h"
+#include "key_capture_button.h"
 
 #include <QCheckBox>
 #include <QColor>
@@ -14,8 +15,60 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QPlainTextEdit>
+#include <cmath>
 
 namespace {
+// WCAG relative luminance + contrast ratio, for warning about unreadable
+// user-chosen text colors.
+double channelLuminance(int c8) {
+    const double c = c8 / 255.0;
+    return c <= 0.03928 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+}
+double relativeLuminance(const QColor &c) {
+    return 0.2126 * channelLuminance(c.red()) +
+           0.7152 * channelLuminance(c.green()) +
+           0.0722 * channelLuminance(c.blue());
+}
+double contrastRatio(const QColor &a, const QColor &b) {
+    const double la = relativeLuminance(a) + 0.05;
+    const double lb = relativeLuminance(b) + 0.05;
+    return la > lb ? la / lb : lb / la;
+}
+
+// Fixed dark theme for the settings window, so it matches the overlays instead
+// of the plain system widget style. Independent of the (user-themeable)
+// overlay colors.
+constexpr auto kSettingsStyle = R"(
+QDialog { background-color: #181818; }
+QWidget { color: #e8e8e8; font-size: 12px; }
+QLabel { color: #cfcfcf; background: transparent; }
+QTabWidget::pane { border: 1px solid #303030; border-radius: 8px; top: -1px; background: #1e1e1e; }
+QTabBar::tab {
+    background: transparent; color: #9a9a9a; padding: 7px 16px; margin-right: 2px;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
+}
+QTabBar::tab:hover { color: #e8e8e8; }
+QTabBar::tab:selected { background: #1e1e1e; color: #1DB954; border-bottom: 2px solid #1DB954; }
+QLineEdit, QSpinBox {
+    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
+    padding: 5px 8px; color: #f0f0f0; selection-background-color: #1DB954;
+}
+QLineEdit:focus, QSpinBox:focus { border: 1px solid #1DB954; }
+QPushButton {
+    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
+    padding: 6px 14px; color: #f0f0f0;
+}
+QPushButton:hover { background: #333333; border-color: #4a4a4a; }
+QPushButton:pressed, QPushButton:checked { background: #1DB954; border-color: #1DB954; color: #06130b; }
+QCheckBox { spacing: 8px; color: #d8d8d8; background: transparent; }
+QCheckBox::indicator {
+    width: 16px; height: 16px; border-radius: 4px;
+    border: 1px solid #4a4a4a; background: #2a2a2a;
+}
+QCheckBox::indicator:checked { background: #1DB954; border-color: #1DB954; }
+QDialogButtonBox QPushButton { min-width: 72px; }
+)";
+
 QWidget *createRow(const QString &labelText, QWidget *fieldWidget, QWidget *parent = nullptr) {
     QWidget *row = new QWidget(parent);
     QHBoxLayout *layout = new QHBoxLayout(row);
@@ -46,6 +99,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle("SpotifyVol Settings");
     setModal(false);
     resize(520, 470);
+    setStyleSheet(kSettingsStyle);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(18, 18, 18, 18);
@@ -56,6 +110,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     titleFont.setPointSize(titleFont.pointSize() + 2);
     titleFont.setBold(true);
     titleLabel->setFont(titleFont);
+    titleLabel->setStyleSheet("color: #1DB954; background: transparent;");
     layout->addWidget(titleLabel);
 
     tabs = new QTabWidget(this);
@@ -67,6 +122,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     QLabel *spotifyTitle = new QLabel("Spotify Connection", spotifyTab);
     spotifyTitle->setFont(titleFont);
+    spotifyTitle->setStyleSheet("color: #f0f0f0; background: transparent;");
     spotifyLayout->addWidget(spotifyTitle);
 
     connectionValueLabel = new QLabel(this);
@@ -77,13 +133,19 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     spotifyLayout->addWidget(helpTextLabel);
 
     connectButton = new QPushButton(this);
+    // Primary call to action: accent-filled to stand out from other buttons.
+    connectButton->setStyleSheet(
+        "QPushButton { background: #1DB954; border: none; border-radius: 6px;"
+        " padding: 7px 18px; color: #06130b; font-weight: bold; }"
+        "QPushButton:hover { background: #1ed760; }"
+        "QPushButton:pressed { background: #17a349; }");
     connect(connectButton, &QPushButton::clicked, this, &SettingsDialog::connectSpotifyRequested);
     spotifyLayout->addWidget(connectButton, 0, Qt::AlignLeft);
 
     logViewer = new QPlainTextEdit(spotifyTab);
     logViewer->setReadOnly(true);
     logViewer->setFixedHeight(140);
-    logViewer->setStyleSheet("QPlainTextEdit { background-color: #2b2b2b; color: #dcdcdc; font-family: monospace; font-size: 10px; border: 1px solid #3c3c3c; border-radius: 4px; padding: 4px; }");
+    logViewer->setStyleSheet("QPlainTextEdit { background-color: #101010; color: #b9b9b9; font-family: monospace; font-size: 10px; border: 1px solid #303030; border-radius: 6px; padding: 6px; }");
     spotifyLayout->addWidget(new QLabel("WebSocket Connection Logs:", spotifyTab));
     spotifyLayout->addWidget(logViewer);
     tabs->addTab(spotifyTab, "Spotify");
@@ -163,19 +225,19 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     coarseStepSpin->setRange(1, 25);
     fineStepSpin = new QSpinBox(this);
     fineStepSpin->setRange(1, 25);
-    mainKeyEdit = new QLineEdit(this);
-    likeKeyEdit = new QLineEdit(this);
+    mainKeyButton = new KeyCaptureButton(this);
+    likeKeyButton = new KeyCaptureButton(this);
     useShiftFineAdjustCheck = new QCheckBox("Use Shift for fine adjustment", this);
-    QLabel *mainKeyHint = new QLabel("Main key is a virtual key code (VK) value, e.g. 0x14 for Caps Lock (default) or 0x41 for 'A'. On macOS it is translated to the matching mac key (Caps Lock is supported).\nHold Shift with the main key to Skip, or Ctrl for Previous.", this);
+    QLabel *mainKeyHint = new QLabel("Click a key field, then press the key you want. The main key toggles volume control; hold Shift with it to Skip, or Ctrl for Previous. (Caps Lock is the default and works on macOS too.)", this);
     mainKeyHint->setWordWrap(true);
 
     keybindsLayout->addRow("Coarse step", coarseStepSpin);
     keybindsLayout->addRow("Fine step", fineStepSpin);
-    keybindsLayout->addRow("Main key (VK)", mainKeyEdit);
-    keybindsLayout->addRow("Like key (VK, with Alt)", likeKeyEdit);
+    keybindsLayout->addRow("Main key", mainKeyButton);
+    keybindsLayout->addRow("Like key (with Alt)", likeKeyButton);
     keybindsLayout->addRow(QString(), useShiftFineAdjustCheck);
     keybindsLayout->addRow(QString(), mainKeyHint);
-    QLabel *likeKeyHint = new QLabel("Alt + the like key saves the current song to your Liked Songs (default 0x53 = 'S').", this);
+    QLabel *likeKeyHint = new QLabel("Alt + the like key saves the current song to your Liked Songs (default: S).", this);
     likeKeyHint->setWordWrap(true);
     keybindsLayout->addRow(QString(), likeKeyHint);
     tabs->addTab(keybindsTab, "Keybinds");
@@ -230,11 +292,11 @@ void SettingsDialog::setOverlaySettings(const OverlaySettings &settings) {
     accentColorEdit->setText(settings.accentColor);
     updateColorPreview(accentColorEdit, accentColorPreview);
     primaryTextColorEdit->setText(settings.primaryTextColor);
-    updateColorPreview(primaryTextColorEdit, primaryTextColorPreview);
+    updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, /*checkTextContrast=*/true);
     secondaryTextColorEdit->setText(settings.secondaryTextColor);
-    updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview);
+    updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, /*checkTextContrast=*/true);
     mutedTextColorEdit->setText(settings.mutedTextColor);
-    updateColorPreview(mutedTextColorEdit, mutedTextColorPreview);
+    updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, /*checkTextContrast=*/true);
     progressBarColorEdit->setText(settings.progressBarColor);
     updateColorPreview(progressBarColorEdit, progressBarColorPreview);
     overlayWidthSpin->setValue(settings.overlayWidth);
@@ -258,8 +320,8 @@ OverlaySettings SettingsDialog::overlaySettings() const {
 void SettingsDialog::setKeybindSettings(const KeybindSettings &settings) {
     coarseStepSpin->setValue(settings.coarseStep);
     fineStepSpin->setValue(settings.fineStep);
-    mainKeyEdit->setText(settings.mainKey);
-    likeKeyEdit->setText(settings.likeKey);
+    mainKeyButton->setKeyHex(settings.mainKey);
+    likeKeyButton->setKeyHex(settings.likeKey);
     useShiftFineAdjustCheck->setChecked(settings.useShiftForFineAdjust);
 }
 
@@ -267,8 +329,8 @@ KeybindSettings SettingsDialog::keybindSettings() const {
     KeybindSettings settings;
     settings.coarseStep = coarseStepSpin->value();
     settings.fineStep = fineStepSpin->value();
-    settings.mainKey = mainKeyEdit->text().trimmed();
-    settings.likeKey = likeKeyEdit->text().trimmed();
+    settings.mainKey = mainKeyButton->keyHex();
+    settings.likeKey = likeKeyButton->keyHex();
     settings.useShiftForFineAdjust = useShiftFineAdjustCheck->isChecked();
     return settings;
 }
@@ -303,12 +365,18 @@ QueueSettings SettingsDialog::queueSettings() const {
 }
 
 void SettingsDialog::wireOverlayControls() {
-    connect(backgroundColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(backgroundColorEdit, backgroundColorPreview); emit overlaySettingsChanged(); });
+    auto refreshTextContrastPreviews = [this]() {
+        updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, /*checkTextContrast=*/true);
+        updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, /*checkTextContrast=*/true);
+        updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, /*checkTextContrast=*/true);
+    };
+    // Changing the background re-scores every text color's contrast against it.
+    connect(backgroundColorEdit, &QLineEdit::textChanged, this, [this, refreshTextContrastPreviews](const QString &) { updateColorPreview(backgroundColorEdit, backgroundColorPreview); refreshTextContrastPreviews(); emit overlaySettingsChanged(); });
     connect(borderColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(borderColorEdit, borderColorPreview); emit overlaySettingsChanged(); });
     connect(accentColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(accentColorEdit, accentColorPreview); emit overlaySettingsChanged(); });
-    connect(primaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(primaryTextColorEdit, primaryTextColorPreview); emit overlaySettingsChanged(); });
-    connect(secondaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview); emit overlaySettingsChanged(); });
-    connect(mutedTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(mutedTextColorEdit, mutedTextColorPreview); emit overlaySettingsChanged(); });
+    connect(primaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, true); emit overlaySettingsChanged(); });
+    connect(secondaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, true); emit overlaySettingsChanged(); });
+    connect(mutedTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, true); emit overlaySettingsChanged(); });
     connect(progressBarColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(progressBarColorEdit, progressBarColorPreview); emit overlaySettingsChanged(); });
     connect(overlayWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit overlaySettingsChanged(); });
     connect(hideDurationSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit overlaySettingsChanged(); });
@@ -317,8 +385,8 @@ void SettingsDialog::wireOverlayControls() {
 void SettingsDialog::wireKeybindControls() {
     connect(coarseStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     connect(fineStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
-    connect(mainKeyEdit, &QLineEdit::textChanged, this, &SettingsDialog::keybindSettingsChanged);
-    connect(likeKeyEdit, &QLineEdit::textChanged, this, &SettingsDialog::keybindSettingsChanged);
+    mainKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
+    likeKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     connect(useShiftFineAdjustCheck, &QCheckBox::toggled, this, &SettingsDialog::keybindSettingsChanged);
 }
 
@@ -345,13 +413,31 @@ QWidget *SettingsDialog::createColorFieldRow(QLineEdit *edit, QLabel *preview, Q
     return row;
 }
 
-void SettingsDialog::updateColorPreview(QLineEdit *edit, QLabel *preview) {
+void SettingsDialog::updateColorPreview(QLineEdit *edit, QLabel *preview, bool checkTextContrast) {
     const QColor color(edit->text().trimmed());
-    if (color.isValid()) {
-        preview->setStyleSheet(QString("background-color: %1; border: 1px solid #555555; border-radius: 4px;").arg(color.name()));
-    } else {
+    if (!color.isValid()) {
         preview->setStyleSheet("background-color: #202020; border: 1px solid #aa5555; border-radius: 4px;");
+        preview->setToolTip("Not a valid color");
+        return;
     }
+
+    // Warn when a text color won't be readable on the chosen background.
+    if (checkTextContrast) {
+        const QColor bg(backgroundColorEdit->text().trimmed());
+        if (bg.isValid()) {
+            const double ratio = contrastRatio(color, bg);
+            if (ratio < 4.5) {
+                preview->setStyleSheet(QString("background-color: %1; border: 2px solid #e0a021; border-radius: 4px;").arg(color.name()));
+                preview->setToolTip(QString("Low contrast on the background (%1:1). Aim for 4.5:1 or higher for readable text.")
+                                        .arg(ratio, 0, 'f', 1));
+                return;
+            }
+            preview->setToolTip(QString("Contrast on the background: %1:1 (good)").arg(ratio, 0, 'f', 1));
+        }
+    } else {
+        preview->setToolTip(color.name());
+    }
+    preview->setStyleSheet(QString("background-color: %1; border: 1px solid #555555; border-radius: 4px;").arg(color.name()));
 }
 
 void SettingsDialog::refreshUi() {

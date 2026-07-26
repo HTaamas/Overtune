@@ -10,6 +10,7 @@ class QCheckBox;
 class QLineEdit;
 class QSpinBox;
 class QTabWidget;
+class KeyCaptureButton;
 
 class QPlainTextEdit;
 
@@ -42,7 +43,10 @@ private:
     void wireKeybindControls();
     void wireQueueControls();
     QWidget *createColorFieldRow(QLineEdit *edit, QLabel *preview, QWidget *parent = nullptr);
-    void updateColorPreview(QLineEdit *edit, QLabel *preview);
+    // Updates the swatch and, when this field is a text color, warns (amber
+    // border + tooltip) if its contrast against the overlay background is
+    // below the WCAG AA threshold of 4.5:1.
+    void updateColorPreview(QLineEdit *edit, QLabel *preview, bool checkTextContrast = false);
 
     QLabel *connectionValueLabel;
     QLabel *helpTextLabel;
@@ -67,8 +71,8 @@ private:
     QSpinBox *coarseStepSpin;
     QSpinBox *fineStepSpin;
     QCheckBox *useShiftFineAdjustCheck;
-    QLineEdit *mainKeyEdit;
-    QLineEdit *likeKeyEdit;
+    KeyCaptureButton *mainKeyButton;
+    KeyCaptureButton *likeKeyButton;
     QCheckBox *queueEnabledCheck;
     QCheckBox *queueShowNowPlayingCheck;
     QCheckBox *queueLockedCheck;

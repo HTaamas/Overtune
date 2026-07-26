@@ -43,6 +43,7 @@ private:
     QLabel *timeLabel;
     QLabel *volumeLabel;
     QLabel *heartLabel;
+    QLabel *speakerIconLabel;
     bool likedNow = false;
     bool smartShuffleNow = false;
     QProgressBar *volumeBar;
