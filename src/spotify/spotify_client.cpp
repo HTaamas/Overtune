@@ -46,7 +46,7 @@ constexpr int kMaxConnectVolume = 65535;
 const char kClientIdHex[] = "65b708073fc0480ea92a077233ca87bd";
 const char kUserAgent[] = "Spotify/125700463 Win32_x86_64/0 (PC desktop)";
 const char kClientVersion[] = "1.2.52.442.g01d2b6ec";
-const char kDeviceName[] = "SpotifyVol";
+const char kDeviceName[] = "Overtune";
 
 const char kDeviceAuthorizeUrl[] = "https://accounts.spotify.com/oauth2/device/authorize";
 const char kAuthorizeUrl[] = "https://accounts.spotify.com/authorize";
@@ -160,7 +160,7 @@ void SpotifyClient::onAuthServerConnection() {
 
             const QByteArray page = code.isEmpty()
                 ? QByteArray("<html><body style=\"font-family:sans-serif\">Authorization failed - you can close this window.</body></html>")
-                : QByteArray("<html><body style=\"font-family:sans-serif\">SpotifyVol is connected - you can close this window.</body></html>");
+                : QByteArray("<html><body style=\"font-family:sans-serif\">Overtune is connected - you can close this window.</body></html>");
             socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: " +
                           QByteArray::number(page.size()) + "\r\n\r\n" + page);
             socket->flush();
@@ -623,7 +623,7 @@ void SpotifyClient::registerConnectState() {
     info->set_name(kDeviceName);
     info->set_device_id(deviceId.toStdString());
     info->set_device_type(spotify::connectstate::devices::COMPUTER);
-    info->set_device_software_version("spotifyvol 1.0");
+    info->set_device_software_version("overtune 1.0");
     info->set_client_id(kClientIdHex);
     info->set_spirc_version("3.2.6");
 

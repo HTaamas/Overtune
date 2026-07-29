@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(APPLE)
-    project(SpotifyVol LANGUAGES CXX OBJCXX)
+    project(Overtune LANGUAGES CXX OBJCXX)
 else()
-    project(SpotifyVol LANGUAGES CXX)
+    project(Overtune LANGUAGES CXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -307,8 +307,8 @@ if(APPLE)
     set_source_files_properties("${APP_ICON_ASSET}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_BUNDLE_NAME "SpotifyVol"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.spotifyvol.app"
+        MACOSX_BUNDLE_BUNDLE_NAME "Overtune"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "dev.htaamas.overtune"
         MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
         MACOSX_BUNDLE_ICON_FILE "app_icon.icns"

@@ -111,8 +111,8 @@ VolumeHandler::VolumeHandler(QObject *parent) : QObject(parent) {
     if (!ensureMacInputAccess()) {
         QMessageBox::information(
             nullptr,
-            "SpotifyVol Permission Needed",
-            "To intercept the volume keys as a bundled app, allow SpotifyVol in System Settings under Privacy & Security > Input Monitoring and Accessibility, then reopen the app."
+            "Overtune Permission Needed",
+            "To intercept the volume keys as a bundled app, allow Overtune in System Settings under Privacy & Security > Input Monitoring and Accessibility, then reopen the app."
         );
         qDebug() << "macOS global volume interception requires Input Monitoring and Accessibility access.";
         return;

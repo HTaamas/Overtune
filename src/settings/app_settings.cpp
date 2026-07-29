@@ -9,7 +9,7 @@ constexpr auto kQueueGroup = "queue";
 
 namespace AppSettings {
 OverlaySettings loadOverlaySettings() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kOverlayGroup);
 
     OverlaySettings config;
@@ -28,7 +28,7 @@ OverlaySettings loadOverlaySettings() {
 }
 
 void saveOverlaySettings(const OverlaySettings &config) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kOverlayGroup);
     settings.setValue("backgroundColor", config.backgroundColor);
     settings.setValue("borderColor", config.borderColor);
@@ -43,42 +43,42 @@ void saveOverlaySettings(const OverlaySettings &config) {
 }
 
 QString loadRefreshToken() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     return settings.value("RefreshToken").toString();
 }
 
 void saveRefreshToken(const QString &token) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.setValue("RefreshToken", token);
 }
 
 void clearRefreshToken() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.remove("RefreshToken");
 }
 
 QString loadUsername() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     return settings.value("Username").toString();
 }
 
 void saveUsername(const QString &username) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.setValue("Username", username);
 }
 
 bool loadRunAsAdmin() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     return settings.value("RunAsAdmin", false).toBool();
 }
 
 void saveRunAsAdmin(bool enabled) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.setValue("RunAsAdmin", enabled);
 }
 
 QString loadOrCreateDeviceId() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     QString deviceId = settings.value("DeviceId").toString();
     if (deviceId.length() != 40) {
         deviceId.clear();
@@ -91,7 +91,7 @@ QString loadOrCreateDeviceId() {
 }
 
 KeybindSettings loadKeybindSettings() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kKeybindsGroup);
 
     KeybindSettings config;
@@ -108,7 +108,7 @@ KeybindSettings loadKeybindSettings() {
 }
 
 void saveKeybindSettings(const KeybindSettings &config) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kKeybindsGroup);
     settings.setValue("coarseStep", config.coarseStep);
     settings.setValue("fineStep", config.fineStep);
@@ -121,7 +121,7 @@ void saveKeybindSettings(const KeybindSettings &config) {
 }
 
 QueueSettings loadQueueSettings() {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kQueueGroup);
 
     QueueSettings config;
@@ -144,7 +144,7 @@ QueueSettings loadQueueSettings() {
 }
 
 void saveQueueSettings(const QueueSettings &config) {
-    QSettings settings("SpotifyVol", "SpotifyVol");
+    QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kQueueGroup);
     settings.setValue("enabled", config.enabled);
     settings.setValue("showNowPlaying", config.showNowPlaying);

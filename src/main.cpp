@@ -41,7 +41,7 @@ void appMessageHandler(QtMsgType type, const QMessageLogContext &, const QString
         if (QApplication::instance() && !dialogQueued.exchange(true)) {
             const QString errorText = msg;
             QMetaObject::invokeMethod(QApplication::instance(), [errorText]() {
-                QMessageBox::critical(nullptr, "SpotifyVol Error", errorText);
+                QMessageBox::critical(nullptr, "Overtune Error", errorText);
                 dialogQueued.store(false);
             }, Qt::QueuedConnection);
         }
@@ -107,6 +107,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     QApplication app(argc, argv);
+    app.setApplicationName("Overtune");
     app.setQuitOnLastWindowClosed(false);
     qInstallMessageHandler(appMessageHandler);
     app.setWindowIcon(QIcon(bundledAppIconPath()));
@@ -201,7 +202,7 @@ int main(int argc, char *argv[]) {
 
     QObject::connect(&spotify, &SpotifyClient::reauthorizationRequired, [&]() {
         settingsDialog.setAuthenticated(false);
-        tray.showNotification("SpotifyVol - reconnect needed",
+        tray.showNotification("Overtune - reconnect needed",
                               "Your Spotify session expired. Open Settings and click Connect Spotify to reconnect.");
     });
 
@@ -331,9 +332,9 @@ int main(int argc, char *argv[]) {
     try {
         return app.exec();
     } catch (const std::exception &ex) {
-        QMessageBox::critical(nullptr, "SpotifyVol Fatal Error", QString("Unhandled exception: %1").arg(ex.what()));
+        QMessageBox::critical(nullptr, "Overtune Fatal Error", QString("Unhandled exception: %1").arg(ex.what()));
     } catch (...) {
-        QMessageBox::critical(nullptr, "SpotifyVol Fatal Error", "Unhandled unknown exception.");
+        QMessageBox::critical(nullptr, "Overtune Fatal Error", "Unhandled unknown exception.");
     }
 
     return 1;

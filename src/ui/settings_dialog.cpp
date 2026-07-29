@@ -96,7 +96,7 @@ QLabel *createColorPreview(QWidget *parent = nullptr) {
 }
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
-    setWindowTitle("SpotifyVol Settings");
+    setWindowTitle("Overtune Settings");
     setModal(false);
     resize(520, 470);
     setStyleSheet(kSettingsStyle);
@@ -106,7 +106,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     layout->setSpacing(12);
 
     // Section-heading font. The window title bar already names the dialog, so
-    // there is no redundant in-window "SpotifyVol Settings" heading.
+    // there is no redundant in-window "Overtune Settings" heading.
     QFont titleFont = font();
     titleFont.setPointSize(titleFont.pointSize() + 2);
     titleFont.setBold(true);
@@ -274,13 +274,13 @@ void SettingsDialog::showAuthorizationPrompt(const QString &url, const QString &
     connectionValueLabel->setText("Waiting for authorization...");
     if (code.isEmpty()) {
         helpTextLabel->setText(
-            QString("<b>Authorize SpotifyVol</b><br>"
+            QString("<b>Authorize Overtune</b><br>"
                     "A browser window was opened. Approve access and you'll be connected automatically.<br>"
                     "If it didn't open, <a href=\"%1\">click here</a>.")
                 .arg(url));
     } else {
         helpTextLabel->setText(
-            QString("<b>Authorize SpotifyVol</b><br>"
+            QString("<b>Authorize Overtune</b><br>"
                     "A browser window was opened to <a href=\"%1\">%1</a>.<br>"
                     "If it didn't open, visit that link and confirm the code <b>%2</b>.")
                 .arg(url, code));
