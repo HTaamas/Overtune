@@ -23,6 +23,8 @@ struct KeybindSettings {
     bool useShiftForFineAdjust = true;
     QString mainKey = "0x14"; // VK_CAPITAL (Caps Lock)
     QString likeKey = "0x53"; // 'S'; pressed together with Alt to like the song
+    QString lockKey = "0x4C"; // 'L'; Alt+L toggles the Up Next window lock
+    QString showKey = "0x55"; // 'U'; Alt+U shows/hides the Up Next window
 };
 
 struct QueueSettings {

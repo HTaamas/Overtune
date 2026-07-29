@@ -269,6 +269,15 @@ int main(int argc, char *argv[]) {
         settingsDialog.setQueueSettings(settings);
     });
 
+    QObject::connect(&volHandler, &VolumeHandler::toggleQueueShowRequested, [&]() {
+        QueueSettings settings = settingsDialog.queueSettings();
+        settings.enabled = !settings.enabled;
+        AppSettings::saveQueueSettings(settings);
+        queueWindow.applyQueueSettings(settings);
+        const QSignalBlocker blocker(&settingsDialog);
+        settingsDialog.setQueueSettings(settings);
+    });
+
     QObject::connect(&queueWindow, &QueueWindow::windowResized, [&](int windowWidth) {
         QueueSettings settings = settingsDialog.queueSettings();
         settings.windowWidth = windowWidth;

@@ -73,6 +73,8 @@ private:
     QCheckBox *useShiftFineAdjustCheck;
     KeyCaptureButton *mainKeyButton;
     KeyCaptureButton *likeKeyButton;
+    KeyCaptureButton *lockKeyButton;
+    KeyCaptureButton *showKeyButton;
     QCheckBox *queueEnabledCheck;
     QCheckBox *queueShowNowPlayingCheck;
     QCheckBox *queueLockedCheck;

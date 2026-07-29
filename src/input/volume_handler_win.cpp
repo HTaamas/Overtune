@@ -5,7 +5,8 @@
 
 #ifdef _WIN32
 HHOOK VolumeHandler::hHook = nullptr;
-bool VolumeHandler::queueLockChordDown = false;
+bool VolumeHandler::lockChordDown = false;
+bool VolumeHandler::showChordDown = false;
 bool VolumeHandler::likeChordDown = false;
 
 VolumeHandler::VolumeHandler(QObject *parent) : QObject(parent) {
@@ -87,10 +88,15 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
     if (nCode == HC_ACTION) {
         KBDLLHOOKSTRUCT *pKey = reinterpret_cast<KBDLLHOOKSTRUCT *>(lParam);
         const DWORD likeVk = instance ? DWORD(instance->keybindSettings.likeKey.toUInt(nullptr, 16)) : 0;
+        const DWORD lockVk = instance ? DWORD(instance->keybindSettings.lockKey.toUInt(nullptr, 16)) : 0;
+        const DWORD showVk = instance ? DWORD(instance->keybindSettings.showKey.toUInt(nullptr, 16)) : 0;
 
         if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
-            if (pKey->vkCode == 'U') {
-                queueLockChordDown = false;
+            if (lockVk != 0 && pKey->vkCode == lockVk) {
+                lockChordDown = false;
+            }
+            if (showVk != 0 && pKey->vkCode == showVk) {
+                showChordDown = false;
             }
             if (likeVk != 0 && pKey->vkCode == likeVk) {
                 likeChordDown = false;
@@ -98,15 +104,25 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
         }
 
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-            if (pKey->vkCode == 'U' && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0) {
-                if (!queueLockChordDown && instance) {
-                    queueLockChordDown = true;
+            const bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+
+            if (lockVk != 0 && pKey->vkCode == lockVk && altDown) {
+                if (!lockChordDown && instance) {
+                    lockChordDown = true;
                     emit instance->toggleQueueLockRequested();
                 }
                 return 1;
             }
 
-            if (likeVk != 0 && pKey->vkCode == likeVk && (GetAsyncKeyState(VK_MENU) & 0x8000) != 0) {
+            if (showVk != 0 && pKey->vkCode == showVk && altDown) {
+                if (!showChordDown && instance) {
+                    showChordDown = true;
+                    emit instance->toggleQueueShowRequested();
+                }
+                return 1;
+            }
+
+            if (likeVk != 0 && pKey->vkCode == likeVk && altDown) {
                 if (!likeChordDown && instance) {
                     likeChordDown = true;
                     emit instance->likeSongRequested();

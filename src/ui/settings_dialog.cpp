@@ -203,7 +203,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     queueOpacitySpin->setSuffix("%");
     queueHoverColorEdit = new QLineEdit(this);
     queueHoverColorPreview = createColorPreview(this);
-    QLabel *queueHint = new QLabel("The Up Next window stays on top and never auto-hides. Drag it anywhere with the mouse, resize it from the left/right edge — position and size are remembered. Locking makes it click-through so it can't be moved or block clicks; toggle the lock any time with Alt+U.", this);
+    QLabel *queueHint = new QLabel("The Up Next window stays on top and never auto-hides. Drag it anywhere with the mouse, resize it from the left/right edge — position and size are remembered. Locking makes it click-through so it can't be moved or block clicks. Global shortcuts (configurable in Keybinds): Alt+L toggles the lock, Alt+U shows/hides the window.", this);
     queueHint->setWordWrap(true);
 
     queueLayout->addRow(QString(), queueEnabledCheck);
@@ -227,6 +227,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fineStepSpin->setRange(1, 25);
     mainKeyButton = new KeyCaptureButton(this);
     likeKeyButton = new KeyCaptureButton(this);
+    lockKeyButton = new KeyCaptureButton(this);
+    showKeyButton = new KeyCaptureButton(this);
     useShiftFineAdjustCheck = new QCheckBox("Use Shift for fine adjustment", this);
     QLabel *mainKeyHint = new QLabel("Click a key field, then press the key you want (or right-click to type a code by hand). The main key toggles volume control; hold Shift with it to Skip, or Ctrl for Previous. (Caps Lock is the default and works on macOS too.)", this);
     mainKeyHint->setWordWrap(true);
@@ -235,11 +237,13 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     keybindsLayout->addRow("Fine step", fineStepSpin);
     keybindsLayout->addRow("Main key", mainKeyButton);
     keybindsLayout->addRow("Like key (with Alt)", likeKeyButton);
+    keybindsLayout->addRow("Lock window key (with Alt)", lockKeyButton);
+    keybindsLayout->addRow("Show/hide window key (with Alt)", showKeyButton);
     keybindsLayout->addRow(QString(), useShiftFineAdjustCheck);
     keybindsLayout->addRow(QString(), mainKeyHint);
-    QLabel *likeKeyHint = new QLabel("Alt + the like key saves the current song to your Liked Songs (default: S).", this);
-    likeKeyHint->setWordWrap(true);
-    keybindsLayout->addRow(QString(), likeKeyHint);
+    QLabel *comboKeyHint = new QLabel("Hold Alt with these keys: the like key saves the current song (default S); the lock key toggles the Up Next window's click-through lock (default L); the show/hide key toggles the window (default U).", this);
+    comboKeyHint->setWordWrap(true);
+    keybindsLayout->addRow(QString(), comboKeyHint);
     tabs->addTab(keybindsTab, "Keybinds");
 
     layout->addWidget(tabs);
@@ -322,6 +326,8 @@ void SettingsDialog::setKeybindSettings(const KeybindSettings &settings) {
     fineStepSpin->setValue(settings.fineStep);
     mainKeyButton->setKeyHex(settings.mainKey);
     likeKeyButton->setKeyHex(settings.likeKey);
+    lockKeyButton->setKeyHex(settings.lockKey);
+    showKeyButton->setKeyHex(settings.showKey);
     useShiftFineAdjustCheck->setChecked(settings.useShiftForFineAdjust);
 }
 
@@ -331,6 +337,8 @@ KeybindSettings SettingsDialog::keybindSettings() const {
     settings.fineStep = fineStepSpin->value();
     settings.mainKey = mainKeyButton->keyHex();
     settings.likeKey = likeKeyButton->keyHex();
+    settings.lockKey = lockKeyButton->keyHex();
+    settings.showKey = showKeyButton->keyHex();
     settings.useShiftForFineAdjust = useShiftFineAdjustCheck->isChecked();
     return settings;
 }
@@ -387,6 +395,8 @@ void SettingsDialog::wireKeybindControls() {
     connect(fineStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     mainKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     likeKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
+    lockKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
+    showKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     connect(useShiftFineAdjustCheck, &QCheckBox::toggled, this, &SettingsDialog::keybindSettingsChanged);
 }
 

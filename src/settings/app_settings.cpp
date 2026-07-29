@@ -90,6 +90,8 @@ KeybindSettings loadKeybindSettings() {
     config.useShiftForFineAdjust = settings.value("useShiftForFineAdjust", config.useShiftForFineAdjust).toBool();
     config.mainKey = settings.value("mainKey", config.mainKey).toString();
     config.likeKey = settings.value("likeKey", config.likeKey).toString();
+    config.lockKey = settings.value("lockKey", config.lockKey).toString();
+    config.showKey = settings.value("showKey", config.showKey).toString();
 
     settings.endGroup();
     return config;
@@ -103,6 +105,8 @@ void saveKeybindSettings(const KeybindSettings &config) {
     settings.setValue("useShiftForFineAdjust", config.useShiftForFineAdjust);
     settings.setValue("mainKey", config.mainKey);
     settings.setValue("likeKey", config.likeKey);
+    settings.setValue("lockKey", config.lockKey);
+    settings.setValue("showKey", config.showKey);
     settings.endGroup();
 }
 
