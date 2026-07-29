@@ -105,20 +105,18 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     layout->setContentsMargins(18, 18, 18, 18);
     layout->setSpacing(12);
 
-    QLabel *titleLabel = new QLabel("SpotifyVol Settings", this);
-    QFont titleFont = titleLabel->font();
+    // Section-heading font. The window title bar already names the dialog, so
+    // there is no redundant in-window "SpotifyVol Settings" heading.
+    QFont titleFont = font();
     titleFont.setPointSize(titleFont.pointSize() + 2);
     titleFont.setBold(true);
-    titleLabel->setFont(titleFont);
-    titleLabel->setStyleSheet("color: #1DB954; background: transparent;");
-    layout->addWidget(titleLabel);
 
     tabs = new QTabWidget(this);
 
     QWidget *spotifyTab = new QWidget(this);
     QVBoxLayout *spotifyLayout = new QVBoxLayout(spotifyTab);
-    spotifyLayout->setContentsMargins(12, 12, 12, 12);
-    spotifyLayout->setSpacing(12);
+    spotifyLayout->setContentsMargins(14, 14, 14, 14);
+    spotifyLayout->setSpacing(10);
 
     QLabel *spotifyTitle = new QLabel("Spotify Connection", spotifyTab);
     spotifyTitle->setFont(titleFont);
@@ -131,6 +129,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     spotifyLayout->addWidget(createRow("Status", connectionValueLabel, spotifyTab));
     spotifyLayout->addWidget(helpTextLabel);
+    spotifyLayout->addSpacing(2);
 
     connectButton = new QPushButton(this);
     // Primary call to action: accent-filled to stand out from other buttons.
@@ -144,10 +143,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
     logViewer = new QPlainTextEdit(spotifyTab);
     logViewer->setReadOnly(true);
-    logViewer->setFixedHeight(140);
+    logViewer->setMinimumHeight(120);
     logViewer->setStyleSheet("QPlainTextEdit { background-color: #101010; color: #b9b9b9; font-family: monospace; font-size: 10px; border: 1px solid #303030; border-radius: 6px; padding: 6px; }");
-    spotifyLayout->addWidget(new QLabel("WebSocket Connection Logs:", spotifyTab));
-    spotifyLayout->addWidget(logViewer);
+    spotifyLayout->addWidget(new QLabel("Connection log:", spotifyTab));
+    // Let the log fill the remaining space so the tab reads as full, not empty.
+    spotifyLayout->addWidget(logViewer, 1);
     tabs->addTab(spotifyTab, "Spotify");
 
     QWidget *overlayTab = new QWidget(this);
