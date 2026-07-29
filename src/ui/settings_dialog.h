@@ -75,6 +75,9 @@ private:
     KeyCaptureButton *likeKeyButton;
     KeyCaptureButton *lockKeyButton;
     KeyCaptureButton *showKeyButton;
+#ifdef _WIN32
+    QCheckBox *runAsAdminCheck;
+#endif
     QCheckBox *queueEnabledCheck;
     QCheckBox *queueShowNowPlayingCheck;
     QCheckBox *queueLockedCheck;

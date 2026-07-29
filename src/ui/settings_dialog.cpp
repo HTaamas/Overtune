@@ -244,6 +244,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QLabel *comboKeyHint = new QLabel("Hold Alt with these keys: the like key saves the current song (default S); the lock key toggles the Up Next window's click-through lock (default L); the show/hide key toggles the window (default U).", this);
     comboKeyHint->setWordWrap(true);
     keybindsLayout->addRow(QString(), comboKeyHint);
+
+#ifdef _WIN32
+    runAsAdminCheck = new QCheckBox("Run as administrator", this);
+    runAsAdminCheck->setChecked(AppSettings::loadRunAsAdmin());
+    connect(runAsAdminCheck, &QCheckBox::toggled, this, [](bool on) { AppSettings::saveRunAsAdmin(on); });
+    keybindsLayout->addRow(QString(), runAsAdminCheck);
+    QLabel *adminHint = new QLabel("Off by default — the app needs no admin rights. Enable this only if you want the hotkeys to work while a program running as administrator has focus (some games/anti-cheat). Takes effect on the next launch.", this);
+    adminHint->setWordWrap(true);
+    keybindsLayout->addRow(QString(), adminHint);
+#endif
+
     tabs->addTab(keybindsTab, "Keybinds");
 
     layout->addWidget(tabs);

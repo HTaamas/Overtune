@@ -66,6 +66,11 @@ QString loadOrCreateDeviceId();
 // Cached Spotify user id (fetched once; needed for collection writes).
 QString loadUsername();
 void saveUsername(const QString &username);
+
+// Opt-in: relaunch elevated at startup so hotkeys work over admin windows.
+// Off by default, so the app needs no administrator rights.
+bool loadRunAsAdmin();
+void saveRunAsAdmin(bool enabled);
 }
 
 #endif // APP_SETTINGS_H

@@ -67,6 +67,16 @@ void saveUsername(const QString &username) {
     settings.setValue("Username", username);
 }
 
+bool loadRunAsAdmin() {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    return settings.value("RunAsAdmin", false).toBool();
+}
+
+void saveRunAsAdmin(bool enabled) {
+    QSettings settings("SpotifyVol", "SpotifyVol");
+    settings.setValue("RunAsAdmin", enabled);
+}
+
 QString loadOrCreateDeviceId() {
     QSettings settings("SpotifyVol", "SpotifyVol");
     QString deviceId = settings.value("DeviceId").toString();

@@ -77,35 +77,17 @@ bool isProcessElevated() {
     return checkResult && isMember;
 }
 
-bool ensureAdminPrivileges() {
-    if (isProcessElevated()) {
-        return true;
-    }
-
+// Relaunch the app elevated. Returns true if an elevated instance was started
+// (so this one should exit); false if the user declined or it failed (so this
+// one should just keep running without admin).
+bool relaunchElevated() {
     wchar_t exePath[MAX_PATH] = {0};
-    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0) {
-        const HINSTANCE elevateResult = ShellExecuteW(
-            nullptr,
-            L"runas",
-            exePath,
-            nullptr,
-            nullptr,
-            SW_SHOWNORMAL
-        );
-        if (reinterpret_cast<INT_PTR>(elevateResult) > 32) {
-            // Relaunch succeeded; current non-elevated process should exit.
-            return false;
-        }
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0) {
+        return false;
     }
-
-    MessageBoxW(
-        nullptr,
-        L"SpotifyVol requires administrator privileges and could not auto-elevate.",
-        L"SpotifyVol",
-        MB_OK | MB_ICONERROR
-    );
-
-    return false;
+    const HINSTANCE result = ShellExecuteW(
+        nullptr, L"runas", exePath, nullptr, nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(result) > 32;
 }
 #endif
 
@@ -113,8 +95,14 @@ bool ensureAdminPrivileges() {
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
-    if (!ensureAdminPrivileges()) {
-        return 0;
+    // Admin isn't required — the low-level keyboard hook works without it. Only
+    // relaunch elevated if the user opted in (to intercept hotkeys over other
+    // admin windows), and only if that relaunch actually starts; otherwise fall
+    // through and run normally.
+    if (AppSettings::loadRunAsAdmin() && !isProcessElevated()) {
+        if (relaunchElevated()) {
+            return 0;
+        }
     }
 #endif
 
