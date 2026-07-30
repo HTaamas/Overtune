@@ -11,11 +11,15 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPixmap>
-#include <QGraphicsOpacityEffect>
-#include <QPropertyAnimation>
+#include <QVariantAnimation>
 
 class ScrollingLabel;
+class OSDCard; // custom card: paints the bleed art, volume edge and pause scrim
 
+// The OSD is design option 3a: a 496x148 card with the album art bleeding into
+// the ground on the left and the volume shown as the card's own lit bottom
+// edge. It appears for hideDurationMs when the volume or track changes and is
+// a passive, click-through display — no transport controls.
 class OSDWindow : public QWidget {
     Q_OBJECT
 public:
@@ -37,34 +41,40 @@ private:
     void applyAlbumArtFallback();
     void positionOnActiveScreen();
     void applyPlatformOverlayBehavior();
+    void updateVolumeVisualState();
+    void setPausedOverlayVisible(bool visible);
+    void animateVolumeTo(int volume);
+    QString formatTime(int ms);
+    void refreshStyles();
+    void relayout();
+    void updateArtistElide();
+
+    OSDCard *card;
+    QWidget *textColumn;
     ScrollingLabel *trackLabel;
-    ScrollingLabel *artistLabel;
-    QLabel *albumArtLabel;
+    QLabel *artistLabel;
     QLabel *timeLabel;
-    QLabel *volumeLabel;
+    QLabel *volCaptionLabel;   // "SPOTIFY VOLUME"
+    QLabel *volumeNumberLabel; // the number, tabular
+    QLabel *percentLabel;      // "%"
     QLabel *heartLabel;
-    QLabel *speakerIconLabel;
-    bool likedNow = false;
-    bool smartShuffleNow = false;
-    QProgressBar *volumeBar;
     QProgressBar *songProgressBar;
-    QLabel *pauseOverlay;
-    QGraphicsOpacityEffect *pauseOverlayEffect;
-    QPropertyAnimation *pauseOverlayFade;
     QTimer *hideTimer;
     QTimer *progressTimer;
     QNetworkAccessManager *network;
-    QWidget *containerWidget;
-    QString lastArtUrl;
+    QVariantAnimation *volumeAnimation;
+    QVariantAnimation *pauseAnimation;
+
+    bool likedNow = false;
+    bool smartShuffleNow = false;
+    int currentVolumeValue = 0;
     int currentProgressMs = 0;
     int totalDurationMs = 0;
     bool isPlayingNow = false;
     bool volumeControlSupportedNow = true;
+    QString lastArtUrl;
+    QString fullArtist;
     OverlaySettings overlaySettings;
-    void updateVolumeVisualState();
-    void setPausedOverlayVisible(bool visible);
-    QString formatTime(int ms);
-    void refreshStyles();
 };
 
 #endif // OSD_WINDOW_H

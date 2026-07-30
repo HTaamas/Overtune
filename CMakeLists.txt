@@ -103,9 +103,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-set(APP_ICON_ASSET "${CMAKE_CURRENT_SOURCE_DIR}/assets/app_icon.png")
-set(APP_ICON_WINDOWS_ICO "${CMAKE_CURRENT_BINARY_DIR}/app_icon.ico")
-set(APP_ICON_WINDOWS_RC "${CMAKE_CURRENT_BINARY_DIR}/app_icon.rc")
+set(APP_ICON_ASSET "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.png")
+set(APP_ICON_WINDOWS_ICO "${CMAKE_CURRENT_BINARY_DIR}/icon.ico")
+set(APP_ICON_WINDOWS_RC "${CMAKE_CURRENT_BINARY_DIR}/icon.rc")
 set(WINDOWS_RUNTIME_DIR "${CMAKE_CURRENT_BINARY_DIR}/runtime")
 set(WINDOWS_MIN_RUNTIME_DIR "${CMAKE_CURRENT_BINARY_DIR}/runtime-min")
 
@@ -126,13 +126,15 @@ set(SOURCES
     src/input/volume_handler.cpp
     src/settings/app_settings.h
     src/settings/app_settings.cpp
+    src/ui/theme.h
+    assets/fonts.qrc
     ${PROTO_SRCS}
 )
 
 if(WIN32)
     list(APPEND SOURCES src/input/volume_handler_win.cpp)
     configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows/app_icon.rc.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/windows/icon.rc.in"
         "${APP_ICON_WINDOWS_RC}"
         @ONLY
     )
@@ -147,12 +149,12 @@ if(APPLE)
 
     # Build a real .icns from the PNG so the bundle shows an icon in Finder, the
     # Dock and the app switcher. (A 1024px square master gives the crispest icon.)
-    set(APP_ICNS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/assets/app_icon.original.png")
+    set(APP_ICNS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.png")
     if(NOT EXISTS "${APP_ICNS_SOURCE}")
         set(APP_ICNS_SOURCE "${APP_ICON_ASSET}")
     endif()
-    set(APP_ICNS "${CMAKE_CURRENT_BINARY_DIR}/app_icon.icns")
-    set(APP_ICONSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/app_icon.iconset")
+    set(APP_ICNS "${CMAKE_CURRENT_BINARY_DIR}/icon.icns")
+    set(APP_ICONSET_DIR "${CMAKE_CURRENT_BINARY_DIR}/icon.iconset")
     add_custom_command(
         OUTPUT "${APP_ICNS}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_ICONSET_DIR}"
@@ -233,7 +235,7 @@ if(WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${APP_ICON_ASSET}"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/app_icon.png"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon.png"
     )
     set_target_properties(${PROJECT_NAME} PROPERTIES
         WIN32_EXECUTABLE TRUE
@@ -253,7 +255,7 @@ if(WIN32)
             "${WINDOWS_RUNTIME_DIR}/"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${APP_ICON_ASSET}"
-            "${WINDOWS_RUNTIME_DIR}/app_icon.png"
+            "${WINDOWS_RUNTIME_DIR}/icon.png"
         COMMAND "${WINDEPLOYQT_EXECUTABLE}"
             --qtpaths "${QTPATHS_EXECUTABLE}"
             --release
@@ -277,7 +279,7 @@ if(WIN32)
             "${WINDOWS_MIN_RUNTIME_DIR}/"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${APP_ICON_ASSET}"
-            "${WINDOWS_MIN_RUNTIME_DIR}/app_icon.png"
+            "${WINDOWS_MIN_RUNTIME_DIR}/icon.png"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_BIN_DIR}/Qt6Core.dll"
             "${QT_BIN_DIR}/Qt6Gui.dll"

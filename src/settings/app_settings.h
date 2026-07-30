@@ -5,16 +5,25 @@
 #include <QString>
 #include <climits>
 
+// Defaults are the Nocturne design tokens (see src/ui/theme.h, the source of
+// truth for these literals). Kept as literals here so this core settings header
+// stays free of the UI/Windows includes theme.h pulls in.
 struct OverlaySettings {
-    QString backgroundColor = "#1c1c1c";
-    QString borderColor = "#333333";
-    QString accentColor = "#1DB954";
-    QString primaryTextColor = "#ffffff";
-    QString secondaryTextColor = "#aaaaaa";
-    QString mutedTextColor = "#888888";
-    QString progressBarColor = "#ffffff";
-    int overlayWidth = 440;
+    QString backgroundColor = "#161826";  // theme::kBg — ground
+    QString surfaceColor = "#232532";     // theme::kSurface — chips, sidebars, menu ground
+    QString borderColor = "#3f424d";      // theme::kNeutral800 — rail troughs, art placeholder ground
+    QString accentColor = "#9184d9";      // theme::kAccent — blurple line/glow/mark
+    QString primaryTextColor = "#e9e9ed"; // theme::kText
+    QString secondaryTextColor = "#9397ab"; // theme::kNeutral500 — artist / secondary
+    QString mutedTextColor = "#75798c";   // theme::kNeutral600 — time, index, muted
+    QString progressBarColor = "#cfd3e5"; // theme::kNeutral300 — song-progress fill
+    int overlayWidth = 496;
     int hideDurationMs = 3500;
+    // Which named theme preset these colours came from ("Nocturne", "Ink",
+    // "Lifted", "Indigo"), or "Custom" once any field is edited by hand. Only a
+    // UI hint for showing which preset is current; the colours above are
+    // authoritative.
+    QString presetName = "Nocturne";
 };
 
 struct KeybindSettings {
@@ -36,7 +45,7 @@ struct QueueSettings {
     bool showLockIcon = true;
     int maxSongs = 5;
     int opacityPercent = 100;
-    QString hoverColor = "#888888";
+    QString hoverColor = "#e9e9ed"; // theme::kText — row hover tint (painted at ~15/255 alpha)
     // Last dragged position of the queue window; INT_MIN means "never placed"
     // and the window picks a default spot on the primary screen.
     int windowX = INT_MIN;

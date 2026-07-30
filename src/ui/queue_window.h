@@ -61,7 +61,9 @@ private:
         QWidget *widget = nullptr;
         QWidget *hoverBg = nullptr;   // HoverHighlight; painted, not styled
         bool hovered = false;
+        QWidget *indexSlot = nullptr; // 16px column; number cross-fades to a play glyph
         QLabel *indexLabel = nullptr;
+        QLabel *playLabel = nullptr;
         QLabel *artLabel = nullptr;
         QLabel *titleLabel = nullptr;
         QLabel *artistLabel = nullptr;
@@ -86,6 +88,7 @@ private:
 
     int headerHeight() const;
     int nowBlockHeight() const;
+    int dividerBlockHeight() const;
     int rowY(int index) const;
     int rowWidth() const;
     int contentHeightFor(int rowCount) const;
@@ -100,7 +103,7 @@ private:
     void updateNowPlayingTime();
     void layoutNowContents();
     void animateNowSwap(bool upFlow, const QPixmap &oldSnapshot);
-    bool lockIconVisible() const;
+    bool lockedChipVisible() const;
     EdgeHit edgeHitTest(const QPoint &windowPos) const;
     int rowIndexAt(const QPoint &windowPos) const;
     void updateHoverCursor(const QPoint &windowPos);
@@ -108,14 +111,20 @@ private:
     static QString formatDuration(int ms);
 
     QWidget *containerWidget;
-    QLabel *headerLabel;
+    QWidget *dividerWidget;    // 1px rule that fades to transparent at both ends
+    QLabel *headerLabel;       // "UP NEXT"
+    QLabel *headerCountLabel;  // queue count
+    QLabel *lockHintIconLabel; // padlock glyph in the header's right corner
+    QLabel *lockHintTextLabel; // "Alt+L to lock"
     QLabel *emptyLabel;
     QWidget *nowWidget;
     QLabel *nowArtLabel;
     QLabel *nowTitleLabel;
     QLabel *nowArtistLabel;
     QLabel *nowTimeLabel;
-    QLabel *lockIconLabel;
+    QWidget *lockedChip;       // "Locked" chip on the now-playing title line
+    QLabel *lockedChipIcon;
+    QLabel *lockedChipText;
     QProgressBar *nowProgressBar;
     QTimer *nowTickTimer;
     QList<Row> rows;

@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- Inter (Google Fonts, SIL Open Font License) shipped with the app and
+       loaded via QFontDatabase::addApplicationFont at startup. Weight 400 and
+       500 only — Nocturne uses size and space for hierarchy, never bold. -->
+  <qresource prefix="/fonts">
+    <file alias="Inter-Regular.ttf">fonts/Inter-Regular.ttf</file>
+    <file alias="Inter-Medium.ttf">fonts/Inter-Medium.ttf</file>
+  </qresource>
+</RCC>

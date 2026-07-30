@@ -2,6 +2,7 @@
 #define SETTINGS_DIALOG_H
 
 #include <QDialog>
+#include <QList>
 #include "settings/app_settings.h"
 
 class QLabel;
@@ -9,10 +10,15 @@ class QPushButton;
 class QCheckBox;
 class QLineEdit;
 class QSpinBox;
-class QTabWidget;
-class KeyCaptureButton;
-
+class QSlider;
+class QStackedWidget;
 class QPlainTextEdit;
+class KeyCaptureButton;
+class OverlayPreview;
+
+// One editable overlay colour: the hex field plus its swatch row and (for text
+// roles) the WCAG contrast tag.
+struct ColorRole;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -28,7 +34,6 @@ public:
     void setQueueSettings(const QueueSettings &settings);
     QueueSettings queueSettings() const;
 
-    // Show the device-flow verification URL and user code while auth is pending.
     void showAuthorizationPrompt(const QString &url, const QString &code);
 
 signals:
@@ -38,63 +43,92 @@ signals:
     void queueSettingsChanged();
 
 private:
+    QWidget *buildSidebar();
+    QWidget *buildConnectionPage();
+    QWidget *buildOverlayPage();
+    QWidget *buildUpNextPage();
+    QWidget *buildKeybindsPage();
+    void selectSection(int index);
     void refreshUi();
     void wireOverlayControls();
     void wireKeybindControls();
     void wireQueueControls();
-    QWidget *createColorFieldRow(QLineEdit *edit, QLabel *preview, QWidget *parent = nullptr);
-    // Updates the swatch and, when this field is a text color, warns (amber
-    // border + tooltip) if its contrast against the overlay background is
-    // below the WCAG AA threshold of 4.5:1.
-    void updateColorPreview(QLineEdit *edit, QLabel *preview, bool checkTextContrast = false);
 
-    QLabel *connectionValueLabel;
-    QLabel *helpTextLabel;
-    QPushButton *connectButton;
-    QTabWidget *tabs;
-    QLineEdit *backgroundColorEdit;
-    QLabel *backgroundColorPreview;
-    QLineEdit *borderColorEdit;
-    QLabel *borderColorPreview;
-    QLineEdit *accentColorEdit;
-    QLabel *accentColorPreview;
-    QLineEdit *primaryTextColorEdit;
-    QLabel *primaryTextColorPreview;
-    QLineEdit *secondaryTextColorEdit;
-    QLabel *secondaryTextColorPreview;
-    QLineEdit *mutedTextColorEdit;
-    QLabel *mutedTextColorPreview;
-    QLineEdit *progressBarColorEdit;
-    QLabel *progressBarColorPreview;
-    QSpinBox *overlayWidthSpin;
-    QSpinBox *hideDurationSpin;
-    QSpinBox *coarseStepSpin;
-    QSpinBox *fineStepSpin;
-    QCheckBox *useShiftFineAdjustCheck;
-    KeyCaptureButton *mainKeyButton;
-    KeyCaptureButton *likeKeyButton;
-    KeyCaptureButton *lockKeyButton;
-    KeyCaptureButton *showKeyButton;
+    // Overlay editing helpers
+    QWidget *makeColorRow(const QString &label, QLineEdit *edit, const QStringList &ramp, bool textRole);
+    void applyPreset(int index);
+    void refreshPresetSelection();
+    void updateColorUi();          // swatches + contrast tags after any change
+    void setDisclosureExpanded(bool expanded);
+
+    QLineEdit *colorEditFor(const QString &role) const;
+
+    // --- sidebar ---
+    QList<QPushButton *> navButtons;
+    QStackedWidget *stack = nullptr;
+    QLabel *sidebarDot = nullptr;
+    QLabel *sidebarStatus = nullptr;
+
+    // --- connection page ---
+    QLabel *connectionValueLabel = nullptr;
+    QLabel *helpTextLabel = nullptr;
+    QPushButton *connectButton = nullptr;
+    QPlainTextEdit *logViewer = nullptr;
+
+    // --- overlay page ---
+    QList<QWidget *> presetCards;
+    QList<QLabel *> presetTags;
+    QPushButton *disclosureButton = nullptr;
+    QWidget *customiseBox = nullptr;
+    bool disclosureExpanded = false;
+    QLineEdit *backgroundColorEdit = nullptr;
+    QLineEdit *surfaceColorEdit = nullptr;
+    QLineEdit *borderColorEdit = nullptr;
+    QLineEdit *accentColorEdit = nullptr;
+    QLineEdit *primaryTextColorEdit = nullptr;
+    QLineEdit *secondaryTextColorEdit = nullptr;
+    QLineEdit *mutedTextColorEdit = nullptr;
+    QLineEdit *progressBarColorEdit = nullptr;
+    QList<QList<QWidget *>> swatchGroups; // swatches per role row, for selection ring
+    QList<QLineEdit *> swatchRoleEdits;   // the edit each swatch group drives (parallel)
+    QLabel *primaryContrastTag = nullptr;
+    QLabel *secondaryContrastTag = nullptr;
+    QLabel *mutedContrastTag = nullptr;
+    QSlider *overlayWidthSlider = nullptr;
+    QLabel *overlayWidthValue = nullptr;
+    QSlider *hideDurationSlider = nullptr;
+    QLabel *hideDurationValue = nullptr;
+    OverlayPreview *preview = nullptr;
+
+    // --- up next page ---
+    QSpinBox *queueMaxSongsSpin = nullptr;
+    QSpinBox *queueOpacitySpin = nullptr;
+    QCheckBox *queueShowNowPlayingCheck = nullptr;
+    QCheckBox *queueShowLockIconCheck = nullptr;
+
+    // --- keybinds page ---
+    KeyCaptureButton *mainKeyButton = nullptr;
+    KeyCaptureButton *likeKeyButton = nullptr;
+    KeyCaptureButton *lockKeyButton = nullptr;
+    KeyCaptureButton *showKeyButton = nullptr;
+    QList<QPushButton *> volumeStepButtons; // segmented: 5 / 2 / 10
 #ifdef _WIN32
-    QCheckBox *runAsAdminCheck;
+    QCheckBox *runAsAdminCheck = nullptr;
 #endif
-    QCheckBox *queueEnabledCheck;
-    QCheckBox *queueShowNowPlayingCheck;
-    QCheckBox *queueLockedCheck;
-    QCheckBox *queueShowLockIconCheck;
-    QSpinBox *queueMaxSongsSpin;
-    QSpinBox *queueOpacitySpin;
-    QLineEdit *queueHoverColorEdit;
-    QLabel *queueHoverColorPreview;
 
     bool authenticated = false;
-    // Position/size aren't edited in the dialog; carried through so a settings
-    // round-trip doesn't wipe the remembered window spot.
+    QString presetName = "Nocturne";
+    // Carried through unchanged (not edited on this screen): the queue window's
+    // position/size, its enabled/locked state (toggled in the tray) and hover
+    // colour, so a settings round-trip doesn't wipe them.
+    bool queueEnabledState = false;
+    bool queueLockedState = false;
+    QString queueHoverColorState = "#e9e9ed";
     int queueWindowX = INT_MIN;
     int queueWindowY = INT_MIN;
     int queueWindowWidth = -1;
-
-    QPlainTextEdit *logViewer = nullptr;
+    int keybindFineStep = 1;
+    bool keybindUseShift = true;
 };
 
 #endif // SETTINGS_DIALOG_H

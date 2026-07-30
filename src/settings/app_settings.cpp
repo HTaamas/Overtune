@@ -14,6 +14,7 @@ OverlaySettings loadOverlaySettings() {
 
     OverlaySettings config;
     config.backgroundColor = settings.value("backgroundColor", config.backgroundColor).toString();
+    config.surfaceColor = settings.value("surfaceColor", config.surfaceColor).toString();
     config.borderColor = settings.value("borderColor", config.borderColor).toString();
     config.accentColor = settings.value("accentColor", config.accentColor).toString();
     config.primaryTextColor = settings.value("primaryTextColor", config.primaryTextColor).toString();
@@ -22,6 +23,7 @@ OverlaySettings loadOverlaySettings() {
     config.progressBarColor = settings.value("progressBarColor", config.progressBarColor).toString();
     config.overlayWidth = qMax(320, settings.value("overlayWidth", config.overlayWidth).toInt());
     config.hideDurationMs = qMax(1000, settings.value("hideDurationMs", config.hideDurationMs).toInt());
+    config.presetName = settings.value("presetName", config.presetName).toString();
 
     settings.endGroup();
     return config;
@@ -31,6 +33,7 @@ void saveOverlaySettings(const OverlaySettings &config) {
     QSettings settings("Overtune", "Overtune");
     settings.beginGroup(kOverlayGroup);
     settings.setValue("backgroundColor", config.backgroundColor);
+    settings.setValue("surfaceColor", config.surfaceColor);
     settings.setValue("borderColor", config.borderColor);
     settings.setValue("accentColor", config.accentColor);
     settings.setValue("primaryTextColor", config.primaryTextColor);
@@ -39,6 +42,7 @@ void saveOverlaySettings(const OverlaySettings &config) {
     settings.setValue("progressBarColor", config.progressBarColor);
     settings.setValue("overlayWidth", config.overlayWidth);
     settings.setValue("hideDurationMs", config.hideDurationMs);
+    settings.setValue("presetName", config.presetName);
     settings.endGroup();
 }
 

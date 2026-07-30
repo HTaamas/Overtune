@@ -5,7 +5,12 @@
 #include <QKeyEvent>
 #include <QContextMenuEvent>
 #include <QInputDialog>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPaintEvent>
+#include <QVariantAnimation>
 #include <functional>
+#include "theme.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -17,26 +22,44 @@
 #include <windows.h>
 #endif
 
-// A button that captures a single physical key press and stores its virtual
-// key code (as a "0xNN" hex string, matching the format the keybind system
+// A chip that captures a single physical key press and stores its virtual key
+// code (as a "0xNN" hex string, matching the format the keybind system
 // expects). It shows a friendly name — "Caps Lock", "A" — instead of forcing
-// the user to know raw VK codes. Click it, then press any key. Right-click to
-// type a code by hand, which is the escape hatch for keys the OS won't report
-// normally (e.g. a Caps Lock disabled via the registry, which surfaces as
-// 0xFF but still fires 0x14 in the global hook).
+// the user to know raw VK codes. Click it, then press any key; while armed the
+// chip reads "Press a key…" in the accent and its border pulses. Right-click to
+// type a code by hand, the escape hatch for keys the OS won't report normally
+// (e.g. a registry-disabled Caps Lock, which surfaces as 0xFF but still fires
+// 0x14 in the global hook). Painted by hand so the chip and its capture pulse
+// match the Nocturne design rather than a platform button.
 class KeyCaptureButton : public QPushButton {
 public:
     explicit KeyCaptureButton(QWidget *parent = nullptr) : QPushButton(parent) {
         setCheckable(true);
         setFocusPolicy(Qt::StrongFocus);
+        setCursor(Qt::PointingHandCursor);
         setToolTip("Click, then press a key. Right-click to type a VK code by hand.");
+        setFont(theme::uiFont(13));
+        pulse = new QVariantAnimation(this);
+        pulse->setStartValue(0.0);
+        pulse->setEndValue(1.0);
+        pulse->setDuration(theme::animMs(1600));
+        pulse->setEasingCurve(QEasingCurve::InOutSine);
+        pulse->setLoopCount(-1);
+        connect(pulse, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+            pulseValue = v.toReal();
+            update();
+        });
         connect(this, &QPushButton::clicked, this, [this](bool checked) {
             capturing = checked;
             refreshText();
             if (capturing) {
                 grabKeyboard();
+                if (theme::animMs(1600) > 0) pulse->start();
             } else {
                 releaseKeyboard();
+                pulse->stop();
+                pulseValue = 0.0;
+                update();
             }
         });
         refreshText();
@@ -47,16 +70,57 @@ public:
 
     void setKeyHex(const QString &hex) {
         vkHex = hex.trimmed();
-        capturing = false;
-        setChecked(false);
-        releaseKeyboard();
+        endCapture();
         refreshText();
     }
 
     // Notified whenever the captured key changes (avoids needing moc/signals).
     std::function<void()> onChanged;
 
+    QSize sizeHint() const override {
+        const int w = fontMetrics().horizontalAdvance(text()) + 26;
+        return QSize(qMax(w, 44), qMax(30, fontMetrics().height() + 12));
+    }
+
 protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF r = rect().adjusted(1, 1, -1, -1);
+        const qreal radius = theme::kRadiusMd;
+
+        QColor ground(theme::kSurface);
+        QColor border(233, 233, 237, 41); // divider
+        QColor textColor(theme::kText);
+        if (capturing) {
+            ground = QColor(theme::kAccent); ground.setAlphaF(0.10);
+            textColor = QColor(theme::kAccent300);
+            border = QColor(theme::kAccent);
+        }
+
+        // Armed pulse: an accent glow that breathes around the chip.
+        if (capturing && pulseValue > 0.0) {
+            QColor glow(theme::kAccent);
+            glow.setAlphaF(0.10 + 0.30 * pulseValue);
+            QPainterPath gp;
+            gp.addRoundedRect(rect().adjusted(0, 0, -1, -1), radius, radius);
+            QPen gpen(glow, 2.5);
+            p.setPen(gpen);
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(gp);
+        }
+
+        QPainterPath path;
+        path.addRoundedRect(r, radius, radius);
+        p.fillPath(path, ground);
+        p.setPen(QPen(border, 1));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+
+        p.setPen(textColor);
+        p.drawText(r, Qt::AlignCenter, text());
+    }
+
     void keyPressEvent(QKeyEvent *event) override {
         if (!capturing) {
             QPushButton::keyPressEvent(event);
@@ -94,9 +158,7 @@ protected:
         }
 
         vkHex = QString("0x%1").arg(vk, 2, 16, QChar('0')).toUpper().replace("0X", "0x");
-        capturing = false;
-        setChecked(false);
-        releaseKeyboard();
+        endCapture();
         refreshText();
         if (onChanged) {
             onChanged();
@@ -106,9 +168,7 @@ protected:
 
     void focusOutEvent(QFocusEvent *event) override {
         if (capturing) {
-            capturing = false;
-            setChecked(false);
-            releaseKeyboard();
+            endCapture();
             refreshText();
         }
         QPushButton::focusOutEvent(event);
@@ -117,9 +177,7 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
         // Manual entry escape hatch: type the VK code in hex.
         if (capturing) {
-            capturing = false;
-            setChecked(false);
-            releaseKeyboard();
+            endCapture();
         }
         bool ok = false;
         const QString current = vkHex.isEmpty() ? QStringLiteral("0x14") : vkHex;
@@ -142,8 +200,19 @@ protected:
     }
 
 private:
+    void endCapture() {
+        capturing = false;
+        setChecked(false);
+        releaseKeyboard();
+        pulse->stop();
+        pulseValue = 0.0;
+        update();
+    }
+
     void refreshText() {
         setText(capturing ? QStringLiteral("Press a key…") : friendlyName(vkHex));
+        updateGeometry();
+        update();
     }
 
     static QString friendlyName(const QString &hex) {
@@ -187,6 +256,8 @@ private:
 
     QString vkHex;
     bool capturing = false;
+    QVariantAnimation *pulse = nullptr;
+    qreal pulseValue = 0.0;
 };
 
 #endif // KEY_CAPTURE_BUTTON_H

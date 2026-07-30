@@ -1,12 +1,13 @@
 #include "osd_window.h"
+#include "theme.h"
 #include <QScreen>
 #include <QGuiApplication>
 #include <QFont>
-#include <QGraphicsDropShadowEffect>
 #include <QFontMetrics>
 #include <QEasingCurve>
 #include <QPainter>
 #include <QPainterPath>
+#include <QLinearGradient>
 #include <QCursor>
 
 #ifdef _WIN32
@@ -20,84 +21,12 @@ void restoreMacOverlayFocus();
 #endif
 
 namespace {
-// Honors the OS "reduce motion" accessibility setting.
-int animMs(int ms) {
-    static const bool reduced = []() {
-#ifdef _WIN32
-        BOOL animEnabled = TRUE;
-        if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animEnabled, 0)) {
-            return !animEnabled;
-        }
-#endif
-        return false;
-    }();
-    return reduced ? 0 : ms;
-}
+using theme::animMs;
 
-constexpr auto kContainerStyle = "background-color: #1c1c1c; border-radius: 12px; border: 1px solid #333333;";
-constexpr auto kAlbumArtFallbackStyle = "border: none; border-radius: 6px; background-color: #2c2c2c; color: #1DB954; font-size: 32px;";
-constexpr auto kTrackLabelStyle = "color: #ffffff; font-weight: bold; font-size: 16px; border: none;";
-constexpr auto kArtistLabelStyle = "color: #aaaaaa; font-size: 13px; border: none;";
-constexpr auto kTimeLabelStyle = "color: #888888; font-size: 11px; font-family: monospace; border: none;";
-constexpr auto kSongProgressStyle =
-    "QProgressBar { background-color: #333333; border: none; border-radius: 2px; }"
-    "QProgressBar::chunk { background-color: #ffffff; border-radius: 2px; }";
-constexpr auto kVolumeAvailableStyle =
-    "QProgressBar { background-color: #333333; border: none; border-radius: 4px; }"
-    "QProgressBar::chunk { background-color: #1DB954; border-radius: 4px; }";
-constexpr auto kVolumeUnavailableStyle =
-    "QProgressBar { background-color: #2e3834; border: none; border-radius: 4px; }"
-    "QProgressBar::chunk { background-color: #6f8f7c; border-radius: 4px; }";
-
-// Type scale (px). Every label sits on one of these steps.
-constexpr int kFontTitle = 16;     // OSD track title
-constexpr int kFontSecondary = 12; // artist / volume caption
-constexpr int kFontMono = 11;      // time / numeric caption
-
-QString makeProgressStyle(const QString &backgroundColor, const QString &chunkColor, int radius) {
-    return QString(
-        "QProgressBar { background-color: %1; border: none; border-radius: %2px; }"
-        "QProgressBar::chunk { background-color: %3; border-radius: %2px; }"
-    ).arg(backgroundColor).arg(radius).arg(chunkColor);
-}
-
-QString artPlaceholderStyle(const QString &bg, const QString &accent) {
-    return QString("border: none; border-radius: 6px; background-color: %1; color: %2; font-size: 32px;")
-        .arg(bg, accent);
-}
-
-// A clean speaker glyph so the volume bar is unmistakably the volume control:
-// a filled square magnet + triangular cone, with two sound waves.
-QPixmap speakerPixmap(int size, const QColor &color) {
-    QPixmap pm(size, size);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    const qreal s = size;
-
-    // Body (magnet block) + cone, drawn as one solid shape.
-    p.setPen(Qt::NoPen);
-    p.setBrush(color);
-    const qreal boxL = s * 0.10, boxR = s * 0.30;
-    const qreal boxT = s * 0.40, boxB = s * 0.60;
-    p.drawRoundedRect(QRectF(boxL, boxT, boxR - boxL, boxB - boxT), s * 0.04, s * 0.04);
-    QPainterPath cone;
-    cone.moveTo(boxR - s * 0.02, boxT - s * 0.01);
-    cone.lineTo(s * 0.52, s * 0.18);
-    cone.lineTo(s * 0.52, s * 0.82);
-    cone.lineTo(boxR - s * 0.02, boxB + s * 0.01);
-    cone.closeSubpath();
-    p.drawPath(cone);
-
-    // Two concentric sound waves.
-    QPen pen(color, qMax(1.2, s * 0.085));
-    pen.setCapStyle(Qt::RoundCap);
-    p.setPen(pen);
-    p.setBrush(Qt::NoBrush);
-    p.drawArc(QRectF(s * 0.52, s * 0.36, s * 0.18, s * 0.28), -75 * 16, 150 * 16);
-    p.drawArc(QRectF(s * 0.52, s * 0.24, s * 0.34, s * 0.52), -62 * 16, 124 * 16);
-    return pm;
-}
+constexpr int kArtSize = 148;    // full-bleed album art, flush to the card edges
+constexpr int kFrameHeight = 148;
+constexpr int kRadius = 14;
+constexpr int kEdgeHeight = 3;   // the lit bottom-edge volume strip
 
 // A four-point sparkle: a slim diamond with concave edges.
 void drawSparkle(QPainter &p, const QPointF &center, qreal radius) {
@@ -125,34 +54,160 @@ QPixmap sparklePixmap(int size, const QColor &color) {
     return pm;
 }
 
-QPixmap makeRoundedPixmap(const QPixmap &source, int targetSize, qreal radius) {
-    QPixmap scaled = source.scaled(targetSize, targetSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-
-    QPixmap result(targetSize, targetSize);
+// Cover-crops source to a size x size square (no rounding — the card clips the
+// corners with its own rounded-rect overflow).
+QPixmap coverSquare(const QPixmap &source, int size) {
+    QPixmap scaled = source.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap result(size, size);
     result.fill(Qt::transparent);
-
     QPainter painter(&result);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    QPainterPath path;
-    path.addRoundedRect(QRectF(0, 0, targetSize, targetSize), radius, radius);
-    painter.setClipPath(path);
-    painter.drawPixmap(0, 0, scaled);
-
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const int x = (size - scaled.width()) / 2;
+    const int y = (size - scaled.height()) / 2;
+    painter.drawPixmap(x, y, scaled);
     return result;
 }
 }
 
+// The card: everything that isn't a text widget is painted here so the art can
+// bleed under the card's rounded corners (overflow:hidden), the volume can be
+// the card's own lit bottom edge, and the pause scrim can cover the whole art
+// block. Text widgets are children laid on top of this background.
+class OSDCard : public QWidget {
+public:
+    explicit OSDCard(QWidget *parent = nullptr) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+
+    void setArt(const QPixmap &pm) { art = pm; update(); }
+    void setColors(const QColor &background, const QColor &fallbackGround,
+                   const QColor &fallbackGlyph, const QColor &edgeHairline) {
+        bg = background;
+        artFallbackGround = fallbackGround;
+        artFallbackGlyph = fallbackGlyph;
+        hairline = edgeHairline;
+        update();
+    }
+    void setVolumeColors(const QColor &fill, bool glow) {
+        volFill = fill;
+        volGlow = glow;
+        update();
+    }
+    void setVolumeFraction(qreal f) { volFrac = qBound<qreal>(0.0, f, 1.0); update(); }
+    qreal volumeFraction() const { return volFrac; }
+    void setPauseOpacity(qreal o) { pauseOpacity = qBound<qreal>(0.0, o, 1.0); update(); }
+    qreal pauseOpacityValue() const { return pauseOpacity; }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        const QRectF r = rect();
+
+        QPainterPath clip;
+        clip.addRoundedRect(r, kRadius, kRadius);
+        p.setClipPath(clip);
+
+        p.fillRect(r, bg);
+
+        // Album art, full-bleed on the left.
+        const QRectF artRect(0, 0, kArtSize, kArtSize);
+        if (!art.isNull()) {
+            p.drawPixmap(artRect.topLeft(), art);
+        } else {
+            p.fillRect(artRect, artFallbackGround);
+            QFont glyphFont;
+            glyphFont.setPixelSize(40);
+            p.setFont(glyphFont);
+            p.setPen(artFallbackGlyph);
+            p.drawText(artRect, Qt::AlignCenter, QStringLiteral("♪")); // ♪
+        }
+
+        // Dissolve the art's right side into the ground.
+        QLinearGradient dissolve(0, 0, kArtSize, 0);
+        QColor clear = bg;
+        clear.setAlpha(0);
+        dissolve.setColorAt(0.0, clear);
+        dissolve.setColorAt(0.45, clear);
+        dissolve.setColorAt(1.0, bg);
+        p.fillRect(artRect, dissolve);
+
+        // Paused: a scrim + two bars over the whole art block.
+        if (pauseOpacity > 0.001) {
+            p.fillRect(artRect, QColor(0, 0, 0, int(110 * pauseOpacity)));
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(255, 255, 255, int(235 * pauseOpacity)));
+            const qreal cx = kArtSize / 2.0, cy = kArtSize / 2.0;
+            p.drawRoundedRect(QRectF(cx - 12, cy - 22, 8, 44), 2, 2);
+            p.drawRoundedRect(QRectF(cx + 4, cy - 22, 8, 44), 2, 2);
+        }
+
+        // Volume as the card's lit bottom edge.
+        const qreal ey = r.height() - kEdgeHeight;
+        QColor track(233, 233, 237);
+        track.setAlpha(20); // rgba(233,233,237,0.08)
+        p.fillRect(QRectF(0, ey, r.width(), kEdgeHeight), track);
+
+        const qreal fillW = r.width() * volFrac;
+        if (fillW > 0.0) {
+            if (volGlow) {
+                // A soft halo around the whole fill: concentric rounded rects
+                // growing outward and fading out, so the glow bleeds up and
+                // sideways past the tip and dissolves — no hard edge, no bright
+                // seam where it meets the fill (which is drawn crisp on top).
+                p.setPen(Qt::NoPen);
+                const int layers = 9;
+                const qreal maxGrow = 16.0;
+                for (int i = layers; i >= 1; --i) {
+                    const qreal t = qreal(i) / layers; // 1 (outer) .. ~0.11 (inner)
+                    const qreal grow = maxGrow * t;
+                    QColor c = volFill;
+                    c.setAlpha(int(58.0 * (1.0 - t) * (1.0 - t) + 8));
+                    QPainterPath hp;
+                    hp.addRoundedRect(QRectF(-grow, ey - grow, fillW + 2 * grow, kEdgeHeight + 2 * grow),
+                                      grow + 1.5, grow + 1.5);
+                    p.fillPath(hp, c);
+                }
+            }
+            p.fillRect(QRectF(0, ey, fillW, kEdgeHeight), volFill);
+        }
+
+        // shadow-md option (a): a 1px hairline edge instead of an ambient blur.
+        p.setClipping(false);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(hairline, 1));
+        QPainterPath edge;
+        edge.addRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), kRadius - 0.5, kRadius - 0.5);
+        p.drawPath(edge);
+    }
+
+private:
+    QPixmap art;
+    QColor bg{theme::kBg};
+    QColor artFallbackGround{theme::kNeutral800};
+    QColor artFallbackGlyph{theme::kAccent700};
+    QColor hairline{theme::kNeutral700};
+    QColor volFill{theme::kAccent};
+    bool volGlow = true;
+    qreal volFrac = 0.0;
+    qreal pauseOpacity = 0.0;
+};
+
+// A single-line label that scrolls its text horizontally when it overflows and
+// shows it statically (no edge fades) when it fits. Ported unchanged from the
+// previous OSD apart from a configurable fade colour and font.
 class ScrollingLabel : public QWidget {
 public:
     explicit ScrollingLabel(QWidget *parent = nullptr)
-        : QWidget(parent), label(new QLabel(this)), timer(new QTimer(this)), leftFade(new QWidget(this)), rightFade(new QWidget(this)) {
+        : QWidget(parent), label(new QLabel(this)), timer(new QTimer(this)),
+          leftFade(new QWidget(this)), rightFade(new QWidget(this)) {
         label->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         label->move(0, 0);
 
         leftFade->setAttribute(Qt::WA_TransparentForMouseEvents);
         rightFade->setAttribute(Qt::WA_TransparentForMouseEvents);
-        leftFade->setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(28,28,28,255), stop:1 rgba(28,28,28,0)); border: none;");
-        rightFade->setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(28,28,28,0), stop:1 rgba(28,28,28,255)); border: none;");
+        setFadeColor(QColor(theme::kBg));
         leftFade->hide();
         rightFade->hide();
 
@@ -171,19 +226,25 @@ public:
         restart();
     }
 
-    void setLabelStyleSheet(const QString &style) {
-        label->setStyleSheet(style);
+    void setLabelStyleSheet(const QString &style) { label->setStyleSheet(style); }
+    void setLabelFont(const QFont &font) {
+        label->setFont(font);
+        restart();
+    }
+
+    void setFadeColor(const QColor &color) {
+        const QString rgb = QString("%1,%2,%3").arg(color.red()).arg(color.green()).arg(color.blue());
+        leftFade->setStyleSheet(QString("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(%1,255), stop:1 rgba(%1,0)); border: none;").arg(rgb));
+        rightFade->setStyleSheet(QString("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(%1,0), stop:1 rgba(%1,255)); border: none;").arg(rgb));
     }
 
     void setScrollingEnabled(bool enabled) {
         scrollingEnabled = enabled;
-
         if (loopWidth <= 0) {
             timer->stop();
             updateFadeVisibility();
             return;
         }
-
         if (scrollingEnabled) {
             timer->start();
         } else {
@@ -192,19 +253,16 @@ public:
             pauseTicks = 20;
             label->move(0, 0);
         }
-
         updateFadeVisibility();
     }
 
 protected:
     void resizeEvent(QResizeEvent *event) override {
         QWidget::resizeEvent(event);
-
         leftFade->setGeometry(0, 0, edgeFadePx, height());
         rightFade->setGeometry(width() - edgeFadePx, 0, edgeFadePx, height());
         leftFade->raise();
         rightFade->raise();
-
         restart();
     }
 
@@ -216,8 +274,6 @@ private:
         label->setText(fullText);
         const QFontMetrics metrics = label->fontMetrics();
         const int textWidth = metrics.horizontalAdvance(fullText);
-
-        label->setText(QStringLiteral("     "));
         const int gapWidth = metrics.horizontalAdvance(QStringLiteral("     "));
 
         if (textWidth <= contentsRect().width() + 2) {
@@ -250,18 +306,15 @@ private:
         if (loopWidth <= 0) {
             return;
         }
-
         if (pauseTicks > 0) {
             --pauseTicks;
             return;
         }
-
         offsetPx += 1;
         if (offsetPx >= loopWidth) {
             offsetPx = 0;
             pauseTicks = 20;
         }
-
         label->move(-offsetPx, 0);
         updateFadeVisibility();
     }
@@ -272,10 +325,8 @@ private:
             rightFade->hide();
             return;
         }
-
         rightFade->show();
         rightFade->raise();
-
         if (offsetPx > 0 && scrollingEnabled) {
             leftFade->show();
             leftFade->raise();
@@ -293,7 +344,7 @@ private:
     bool scrollingEnabled = true;
     QWidget *leftFade;
     QWidget *rightFade;
-    const int edgeFadePx = 8;
+    const int edgeFadePx = 12;
 };
 
 OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAccessManager(this)) {
@@ -312,127 +363,64 @@ OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAcc
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    containerWidget = new QWidget(this);
-    containerWidget->setStyleSheet(kContainerStyle);
+    card = new OSDCard(this);
+    mainLayout->addWidget(card);
 
-    QHBoxLayout *hLayout = new QHBoxLayout(containerWidget);
-    hLayout->setContentsMargins(15, 15, 15, 15);
-    hLayout->setSpacing(15);
+    // Right-hand text column, painted on top of the card.
+    textColumn = new QWidget(card);
+    textColumn->setStyleSheet("background: transparent; border: none;");
+    QVBoxLayout *textLayout = new QVBoxLayout(textColumn);
+    textLayout->setContentsMargins(theme::kSpace4, theme::kSpace6, theme::kSpace6, theme::kSpace6);
+    textLayout->setSpacing(theme::kSpace2);
+    textLayout->addStretch(1);
 
-    albumArtLabel = new QLabel(this);
-    albumArtLabel->setFixedSize(80, 80);
-    albumArtLabel->setStyleSheet(artPlaceholderStyle(overlaySettings.borderColor, overlaySettings.accentColor));
-    albumArtLabel->setScaledContents(false);
-    albumArtLabel->setAlignment(Qt::AlignCenter);
-    albumArtLabel->setText("🎵");
-
-    pauseOverlay = new QLabel(albumArtLabel);
-    pauseOverlay->setFixedSize(albumArtLabel->size());
-    pauseOverlay->setAlignment(Qt::AlignCenter);
-    QPixmap pauseIcon(20, 20);
-    pauseIcon.fill(Qt::transparent);
-    {
-        QPainter painter(&pauseIcon);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor(255, 255, 255, 235));
-        painter.drawRoundedRect(QRectF(4, 3, 4, 14), 1.5, 1.5);
-        painter.drawRoundedRect(QRectF(12, 3, 4, 14), 1.5, 1.5);
-    }
-    pauseOverlay->setPixmap(pauseIcon);
-    pauseOverlay->setStyleSheet("background-color: rgba(0, 0, 0, 110); border-radius: 6px; border: none;");
-    pauseOverlay->move(0, 0);
-
-    pauseOverlayEffect = new QGraphicsOpacityEffect(pauseOverlay);
-    pauseOverlayEffect->setOpacity(0.0);
-    pauseOverlay->setGraphicsEffect(pauseOverlayEffect);
-
-    pauseOverlayFade = new QPropertyAnimation(pauseOverlayEffect, "opacity", this);
-    pauseOverlayFade->setDuration(animMs(200));
-    pauseOverlayFade->setEasingCurve(QEasingCurve::InOutQuad);
-
-    pauseOverlay->show();
-    hLayout->addWidget(albumArtLabel);
-
-    QVBoxLayout *textLayout = new QVBoxLayout();
-    textLayout->setSpacing(2);
-
-    trackLabel = new ScrollingLabel(this);
-    trackLabel->setLabelStyleSheet(kTrackLabelStyle);
-    trackLabel->setFixedHeight(24);
-
-    heartLabel = new QLabel(this);
+    trackLabel = new ScrollingLabel(textColumn);
+    trackLabel->setFixedHeight(30);
+    heartLabel = new QLabel(textColumn);
     heartLabel->setFixedWidth(20);
     heartLabel->setFixedHeight(24);
     heartLabel->setAlignment(Qt::AlignCenter);
 
-    // Title line: scrolling track name on the left, liked heart pinned right.
     QHBoxLayout *titleRow = new QHBoxLayout();
     titleRow->setContentsMargins(0, 0, 0, 0);
-    titleRow->setSpacing(6);
+    titleRow->setSpacing(theme::kSpace3);
     titleRow->addWidget(trackLabel, 1);
     titleRow->addWidget(heartLabel, 0);
 
-    artistLabel = new ScrollingLabel(this);
-    artistLabel->setLabelStyleSheet(kArtistLabelStyle);
-    artistLabel->setFixedHeight(20);
+    artistLabel = new QLabel(textColumn);
+    artistLabel->setFixedHeight(18);
 
-    volumeLabel = new QLabel(this);
-    volumeLabel->setFixedHeight(16);
-    volumeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    volumeBar = new QProgressBar(this);
-    volumeBar->setRange(0, 100);
-    volumeBar->setTextVisible(false);
-    volumeBar->setFixedHeight(8);
-
-    // Speaker glyph pinned to the volume bar so it reads unmistakably as the
-    // volume control (vs the thinner song-progress bar above it).
-    speakerIconLabel = new QLabel(this);
-    speakerIconLabel->setFixedSize(14, 14);
-    speakerIconLabel->setAlignment(Qt::AlignCenter);
-    speakerIconLabel->setStyleSheet("border: none; background: transparent;");
-
-    songProgressBar = new QProgressBar(this);
+    songProgressBar = new QProgressBar(textColumn);
     songProgressBar->setTextVisible(false);
-    songProgressBar->setFixedHeight(4);
-    songProgressBar->setStyleSheet(kSongProgressStyle);
-
-    timeLabel = new QLabel(this);
-    timeLabel->setStyleSheet(kTimeLabelStyle);
+    songProgressBar->setFixedHeight(2);
+    timeLabel = new QLabel(textColumn);
     timeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     timeLabel->setFixedHeight(16);
 
-    // Progress row: the thin song bar with the elapsed/total time beside it.
     QHBoxLayout *progressRow = new QHBoxLayout();
     progressRow->setContentsMargins(0, 0, 0, 0);
-    progressRow->setSpacing(8);
+    progressRow->setSpacing(theme::kSpace3);
     progressRow->addWidget(songProgressBar, 1);
     progressRow->addWidget(timeLabel, 0);
 
-    // Volume row: speaker icon + the volume bar + the percentage — so each bar
-    // is self-labeling and can't be confused with the other.
+    volCaptionLabel = new QLabel(QStringLiteral("SPOTIFY VOLUME"), textColumn);
+    volumeNumberLabel = new QLabel(textColumn);
+    percentLabel = new QLabel(QStringLiteral("%"), textColumn);
+
     QHBoxLayout *volumeRow = new QHBoxLayout();
     volumeRow->setContentsMargins(0, 0, 0, 0);
-    volumeRow->setSpacing(6);
-    volumeRow->addWidget(speakerIconLabel, 0);
-    volumeRow->addWidget(volumeBar, 1);
-    volumeRow->addWidget(volumeLabel, 0);
+    volumeRow->setSpacing(theme::kSpace2);
+    volumeRow->addWidget(volCaptionLabel, 1, Qt::AlignBottom);
+    volumeRow->addWidget(volumeNumberLabel, 0, Qt::AlignBottom);
+    volumeRow->addWidget(percentLabel, 0, Qt::AlignBottom);
 
     textLayout->addLayout(titleRow);
     textLayout->addWidget(artistLabel);
-    textLayout->addStretch(); // Push progress and volume to the bottom
     textLayout->addLayout(progressRow);
-    textLayout->addSpacing(4);
     textLayout->addLayout(volumeRow);
+    textLayout->addStretch(1);
 
-    hLayout->addLayout(textLayout);
-    hLayout->setStretch(1, 1);
-
-    mainLayout->addWidget(containerWidget);
-
-    setFixedSize(440, 110); // Exactly album art (80) + top margin (15) + bottom margin (15)
-
+    setFixedSize(496, kFrameHeight);
     positionOnActiveScreen();
 
     hideTimer = new QTimer(this);
@@ -445,25 +433,43 @@ OSDWindow::OSDWindow(QWidget *parent) : QWidget(parent), network(new QNetworkAcc
     progressTimer = new QTimer(this);
     connect(progressTimer, &QTimer::timeout, this, &OSDWindow::updateSongProgress);
 
+    volumeAnimation = new QVariantAnimation(this);
+    volumeAnimation->setEasingCurve(QEasingCurve::OutQuad);
+    connect(volumeAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        card->setVolumeFraction(v.toReal());
+    });
+
+    pauseAnimation = new QVariantAnimation(this);
+    pauseAnimation->setEasingCurve(QEasingCurve::InOutQuad);
+    connect(pauseAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        card->setPauseOpacity(v.toReal());
+    });
+
     overlaySettings = AppSettings::loadOverlaySettings();
     applyOverlaySettings(overlaySettings);
+}
+
+void OSDWindow::relayout() {
+    card->setGeometry(rect());
+    textColumn->setGeometry(kArtSize, 0, width() - kArtSize, height());
 }
 
 void OSDWindow::showVolume(int volume, const QString &track, const QString &artist, const QString &albumArtUrl, int progressMs, int durationMs, bool isPlaying, bool volumeControlSupported) {
     positionOnActiveScreen();
     trackLabel->setText(track.isEmpty() ? "Loading..." : track);
-    artistLabel->setText(artist.isEmpty() ? "Spotify" : artist);
-    volumeBar->setValue(volume);
+    fullArtist = artist.isEmpty() ? QStringLiteral("Spotify") : artist;
+    updateArtistElide();
 
+    currentVolumeValue = volume;
     currentProgressMs = progressMs;
     totalDurationMs = durationMs;
     isPlayingNow = isPlaying;
     volumeControlSupportedNow = volumeControlSupported;
     trackLabel->setScrollingEnabled(isPlayingNow);
-    artistLabel->setScrollingEnabled(isPlayingNow);
     setPausedOverlayVisible(!isPlayingNow);
     updateVolumeVisualState();
-    songProgressBar->setRange(0, durationMs);
+    animateVolumeTo(volume);
+    songProgressBar->setRange(0, qMax(1, durationMs));
     songProgressBar->setValue(progressMs);
     timeLabel->setText(formatTime(progressMs) + " / " + formatTime(durationMs));
 
@@ -489,13 +495,13 @@ void OSDWindow::setLikedState(bool liked, bool smartShuffle) {
     if (!liked && smartShuffle) {
         heartLabel->setText("");
         heartLabel->setStyleSheet("border: none; background: transparent;");
-        heartLabel->setPixmap(sparklePixmap(16, QColor(overlaySettings.accentColor)));
+        heartLabel->setPixmap(sparklePixmap(15, QColor(overlaySettings.accentColor)));
         return;
     }
     heartLabel->setPixmap(QPixmap());
-    heartLabel->setText(liked ? "♥" : "♡");
-    heartLabel->setStyleSheet(QString("color: %1; font-size: 16px; border: none;")
-        .arg(liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
+    heartLabel->setText(liked ? QStringLiteral("♥") : QStringLiteral("♡")); // ♥ / ♡
+    heartLabel->setStyleSheet(QString("color: %1; font-size: 15px; border: none; background: transparent;")
+        .arg(liked ? overlaySettings.accentColor : theme::kNeutral600));
 }
 
 void OSDWindow::syncProgress(int progressMs, bool isPlaying, bool volumeControlSupported) {
@@ -503,7 +509,6 @@ void OSDWindow::syncProgress(int progressMs, bool isPlaying, bool volumeControlS
     isPlayingNow = isPlaying;
     volumeControlSupportedNow = volumeControlSupported;
     trackLabel->setScrollingEnabled(isPlayingNow);
-    artistLabel->setScrollingEnabled(isPlayingNow);
     setPausedOverlayVisible(!isPlayingNow);
     updateVolumeVisualState();
     if (isVisible()) {
@@ -512,24 +517,46 @@ void OSDWindow::syncProgress(int progressMs, bool isPlaying, bool volumeControlS
     }
 }
 
-void OSDWindow::updateVolumeVisualState() {
-    if (volumeControlSupportedNow) {
-        volumeLabel->setText(QString("%1%").arg(volumeBar->value()));
-        volumeLabel->setStyleSheet(QString("color: %1; font-size: %2px; font-weight: 600; border: none;").arg(overlaySettings.secondaryTextColor).arg(kFontSecondary));
-        volumeBar->setStyleSheet(makeProgressStyle(overlaySettings.borderColor, overlaySettings.accentColor, 4));
+void OSDWindow::animateVolumeTo(int volume) {
+    const qreal target = qBound(0, volume, 100) / 100.0;
+    volumeAnimation->stop();
+    const int dur = animMs(190);
+    if (dur == 0) { // reduce motion: a duration-0 QVariantAnimation is unreliable
+        card->setVolumeFraction(target);
         return;
     }
+    volumeAnimation->setDuration(dur);
+    volumeAnimation->setStartValue(card->volumeFraction());
+    volumeAnimation->setEndValue(target);
+    volumeAnimation->start();
+}
 
-    volumeLabel->setText("unavailable");
-    volumeLabel->setStyleSheet(QString("color: %1; font-size: %2px; font-weight: 600; border: none;").arg(overlaySettings.mutedTextColor).arg(kFontSecondary));
-    volumeBar->setStyleSheet(makeProgressStyle(overlaySettings.borderColor, overlaySettings.mutedTextColor, 4));
+void OSDWindow::updateVolumeVisualState() {
+    if (volumeControlSupportedNow) {
+        volumeNumberLabel->setText(QString::number(currentVolumeValue));
+        volumeNumberLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kAccent300));
+        percentLabel->show();
+        card->setVolumeColors(QColor(overlaySettings.accentColor), /*glow=*/true);
+        return;
+    }
+    volumeNumberLabel->setText(QStringLiteral("unavailable"));
+    volumeNumberLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+    percentLabel->hide();
+    card->setVolumeColors(QColor(theme::kNeutral600), /*glow=*/false);
 }
 
 void OSDWindow::setPausedOverlayVisible(bool visible) {
-    pauseOverlayFade->stop();
-    pauseOverlayFade->setStartValue(pauseOverlayEffect->opacity());
-    pauseOverlayFade->setEndValue(visible ? 1.0 : 0.0);
-    pauseOverlayFade->start();
+    const qreal target = visible ? 1.0 : 0.0;
+    pauseAnimation->stop();
+    const int dur = animMs(200);
+    if (dur == 0) { // reduce motion: a duration-0 QVariantAnimation is unreliable
+        card->setPauseOpacity(target);
+        return;
+    }
+    pauseAnimation->setDuration(dur);
+    pauseAnimation->setStartValue(card->pauseOpacityValue());
+    pauseAnimation->setEndValue(target);
+    pauseAnimation->start();
 }
 
 void OSDWindow::updateSongProgress() {
@@ -564,7 +591,6 @@ void OSDWindow::positionOnActiveScreen() {
     if (!targetScreen) {
         return;
     }
-
     const QRect screenGeometry = targetScreen->availableGeometry();
     move(
         screenGeometry.x() + (screenGeometry.width() - width()) / 2,
@@ -585,10 +611,15 @@ QString OSDWindow::formatTime(int ms) {
     return QString("%1:%2").arg(minutes).arg(seconds, 2, 10, QChar('0'));
 }
 
+void OSDWindow::updateArtistElide() {
+    // Compute the budget from the column geometry (reliable even before the
+    // layout has run), not from the label's not-yet-assigned width.
+    const int budget = qMax(20, width() - kArtSize - theme::kSpace4 - theme::kSpace6);
+    artistLabel->setText(QFontMetrics(artistLabel->font()).elidedText(fullArtist, Qt::ElideRight, budget));
+}
+
 void OSDWindow::applyAlbumArtFallback() {
-    albumArtLabel->setPixmap(QPixmap());
-    albumArtLabel->setStyleSheet(artPlaceholderStyle(overlaySettings.borderColor, overlaySettings.accentColor));
-    albumArtLabel->setText("♪");
+    card->setArt(QPixmap());
 }
 
 void OSDWindow::onImageDownloaded(QNetworkReply *reply) {
@@ -596,16 +627,12 @@ void OSDWindow::onImageDownloaded(QNetworkReply *reply) {
         QByteArray imageData = reply->readAll();
         QPixmap pixmap;
         if (pixmap.loadFromData(imageData)) {
-            albumArtLabel->setText(""); // Clear fallback
-            albumArtLabel->setStyleSheet("border: none; border-radius: 6px; background: transparent;");
-            albumArtLabel->setPixmap(makeRoundedPixmap(pixmap, albumArtLabel->width(), 6.0));
+            card->setArt(coverSquare(pixmap, kArtSize));
         } else {
             applyAlbumArtFallback();
         }
     } else {
-        albumArtLabel->setPixmap(QPixmap());
-        albumArtLabel->setStyleSheet(artPlaceholderStyle(overlaySettings.borderColor, overlaySettings.accentColor));
-        albumArtLabel->setText("🎵");
+        applyAlbumArtFallback();
         qDebug() << "Image Download Error:" << reply->errorString();
     }
     reply->deleteLater();
@@ -613,22 +640,46 @@ void OSDWindow::onImageDownloaded(QNetworkReply *reply) {
 
 void OSDWindow::applyOverlaySettings(const OverlaySettings &settings) {
     overlaySettings = settings;
-    setFixedSize(overlaySettings.overlayWidth, height());
+    setFixedSize(qMax(320, overlaySettings.overlayWidth), kFrameHeight);
+    relayout();
     refreshStyles();
     updateVolumeVisualState();
 }
 
 void OSDWindow::refreshStyles() {
-    containerWidget->setStyleSheet(QString("background-color: %1; border-radius: 12px; border: 1px solid %2;")
-        .arg(overlaySettings.backgroundColor, overlaySettings.borderColor));
-    trackLabel->setLabelStyleSheet(QString("color: %1; font-weight: bold; font-size: %2px; border: none;").arg(overlaySettings.primaryTextColor).arg(kFontTitle));
-    artistLabel->setLabelStyleSheet(QString("color: %1; font-size: %2px; border: none;").arg(overlaySettings.secondaryTextColor).arg(kFontSecondary));
-    timeLabel->setStyleSheet(QString("color: %1; font-size: %2px; font-family: monospace; border: none;").arg(overlaySettings.mutedTextColor).arg(kFontMono));
-    speakerIconLabel->setPixmap(speakerPixmap(14, QColor(overlaySettings.secondaryTextColor)));
-    setLikedState(likedNow, smartShuffleNow);
-    songProgressBar->setStyleSheet(makeProgressStyle(overlaySettings.borderColor, overlaySettings.progressBarColor, 2));
+    card->setColors(QColor(overlaySettings.backgroundColor),
+                    QColor(overlaySettings.borderColor),
+                    QColor(theme::kAccent700),
+                    QColor(theme::kNeutral700));
 
-    if (albumArtLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        applyAlbumArtFallback();
-    }
+    // Title: 21px/500, letter-spacing -0.02em, in Inter.
+    QFont titleFont = theme::uiFont(21, QFont::Medium);
+    titleFont.setLetterSpacing(QFont::PercentageSpacing, 98);
+    trackLabel->setLabelFont(titleFont);
+    trackLabel->setLabelStyleSheet(QString("color: %1; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
+    trackLabel->setFadeColor(QColor(overlaySettings.backgroundColor));
+
+    artistLabel->setFont(theme::uiFont(13));
+    artistLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
+
+    timeLabel->setFont(theme::uiFont(11, QFont::Normal, /*tabular=*/true));
+    timeLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+
+    QFont captionFont = theme::uiFont(10);
+    captionFont.setLetterSpacing(QFont::AbsoluteSpacing, 1.2); // ~0.12em at 10px
+    captionFont.setCapitalization(QFont::AllUppercase);
+    volCaptionLabel->setFont(captionFont);
+    volCaptionLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+
+    volumeNumberLabel->setFont(theme::uiFont(15, QFont::Medium, /*tabular=*/true));
+    percentLabel->setFont(theme::uiFont(10));
+    percentLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kAccent400));
+
+    songProgressBar->setStyleSheet(QString(
+        "QProgressBar { background-color: %1; border: none; border-radius: 1px; }"
+        "QProgressBar::chunk { background-color: %2; border-radius: 1px; }")
+        .arg(overlaySettings.borderColor, overlaySettings.progressBarColor));
+
+    setLikedState(likedNow, smartShuffleNow);
+    updateArtistElide();
 }

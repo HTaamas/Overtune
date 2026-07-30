@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Overtune — the Nocturne line mark: an accent ring with three sound-wave
+       arcs, on the design ground. No filled disc, no green. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1d2b"/>
+      <stop offset="1" stop-color="#12131d"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#plate)"/>
+  <circle cx="512" cy="512" r="352" fill="none" stroke="#9184d9" stroke-width="24"/>
+  <path d="M384 416 C464 352 592 352 672 416" fill="none" stroke="#9184d9" stroke-width="41.6" stroke-linecap="round"/>
+  <path d="M352 528 C464 440 624 440 704 528" fill="none" stroke="#b5abfc" stroke-width="41.6" stroke-linecap="round"/>
+  <path d="M384 640 C464 584 592 584 656 640" fill="none" stroke="#d2cefd" stroke-width="41.6" stroke-linecap="round"/>
+</svg>

@@ -1,4 +1,5 @@
 #include "queue_window.h"
+#include "theme.h"
 
 #include <QEasingCurve>
 #include <QFontMetrics>
@@ -6,6 +7,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -27,32 +29,19 @@ void applyMacOverlayWindowBehavior(QWidget *widget);
 #endif
 
 namespace {
-// Honors the OS "reduce motion" / "show animations" accessibility setting.
-bool reducedMotion() {
-    static const bool reduced = []() {
-#ifdef _WIN32
-        BOOL animEnabled = TRUE;
-        if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animEnabled, 0)) {
-            return !animEnabled;
-        }
-#endif
-        return false;
-    }();
-    return reduced;
-}
-// Collapses an animation duration to 0 (instant) when reduced motion is on.
-int animMs(int ms) { return reducedMotion() ? 0 : ms; }
+using theme::animMs;
 
-constexpr int kArtSize = 36;
-constexpr int kNowArtSize = 48;
-constexpr int kNowHeight = 58;
-constexpr int kNowGap = 12;
-constexpr int kRowHeight = 36;
-constexpr int kRowGap = 6;
-constexpr int kMarginX = 15;
-constexpr int kMarginTop = 12;
-constexpr int kMarginBottom = 12;
-constexpr int kHeaderGap = 8;
+constexpr int kArtSize = 44;       // queue-row album art
+constexpr int kNowArtSize = 56;    // now-playing album art
+constexpr int kNowHeight = 56;
+constexpr int kNowGap = 11;         // now art -> text (space-4)
+constexpr int kRowHeight = 52;
+constexpr int kRowGap = 3;          // between rows (space-1)
+constexpr int kRowContentGap = 8;   // inside a row (space-3)
+constexpr int kMargin = 17;         // window padding all round (space-6)
+constexpr int kHeaderGap = 8;       // header -> first row (space-3)
+constexpr int kDividerMarginTop = 17;
+constexpr int kDividerMarginBottom = 11;
 constexpr int kResizeGripPx = 8;
 constexpr int kMinWidth = 240;
 constexpr int kMaxWidth = 900;
@@ -62,25 +51,20 @@ constexpr int kSlideMs = 280;
 constexpr int kRowFadeInMs = 240;
 constexpr int kRowFadeOutMs = 180;
 constexpr int kRowEnterOffsetPx = 14;
-constexpr int kLockIconSize = 14;
-constexpr int kRowIconSize = 14;   // heart / sparkle badges on each queue row
-constexpr int kHoverMaxAlpha = 36; // out of 255, ~14%
+constexpr int kHeaderIconSize = 11;  // padlock glyph in the header hint
+constexpr int kRowBadgeSize = 13;    // heart / sparkle on each row
+constexpr int kIndexSlot = 16;
+constexpr int kHoverMaxAlpha = 15;   // out of 255, ~6% (the divider hover tint)
 
-// Painted directly instead of via stylesheets: animating setStyleSheet
-// forces a repolish every frame, which caused visible glitches.
+// Painted directly instead of via stylesheets: animating setStyleSheet forces
+// a repolish every frame, which caused visible glitches.
 class HoverHighlight : public QWidget {
 public:
     explicit HoverHighlight(QWidget *parent) : QWidget(parent) {
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
-
-    void setColor(const QColor &c) {
-        color = c;
-        update();
-    }
-
+    void setColor(const QColor &c) { color = c; update(); }
     qreal alphaFraction() const { return alpha; }
-
     void setAlphaFraction(qreal a) {
         alpha = qBound<qreal>(0.0, a, 1.0);
         update();
@@ -97,7 +81,7 @@ protected:
         c.setAlpha(int(alpha * kHoverMaxAlpha));
         p.setPen(Qt::NoPen);
         p.setBrush(c);
-        p.drawRoundedRect(rect(), 6, 6);
+        p.drawRoundedRect(rect(), theme::kRadiusMd, theme::kRadiusMd);
     }
 
 private:
@@ -105,27 +89,71 @@ private:
     qreal alpha = 0.0;
 };
 
+// A 1px rule that fades to transparent over its first and last 48px — a
+// Nocturne signature that replaces a bare gap between the now block and queue.
+class FadingRule : public QWidget {
+public:
+    explicit FadingRule(QWidget *parent) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFixedHeight(1);
+    }
+    void setColor(const QColor &c) { color = c; update(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        const qreal w = width();
+        if (w <= 0) {
+            return;
+        }
+        QPainter p(this);
+        QLinearGradient g(0, 0, w, 0);
+        QColor edge = color;
+        edge.setAlpha(0);
+        const qreal f = qMin(0.5, 48.0 / w);
+        g.setColorAt(0.0, edge);
+        g.setColorAt(f, color);
+        g.setColorAt(1.0 - f, color);
+        g.setColorAt(1.0, edge);
+        p.fillRect(rect(), g);
+    }
+
+private:
+    QColor color{233, 233, 237, 41}; // text @16%
+};
+
 QPixmap lockPixmap(int size, const QColor &color) {
     QPixmap pm(size, size);
     pm.fill(Qt::transparent);
-
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-
-    // Shackle
     QPen pen(color, qMax(1.5, size * 0.13));
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
     p.drawArc(QRectF(size * 0.26, size * 0.10, size * 0.48, size * 0.52), 0, 180 * 16);
-
-    // Body
     p.setPen(Qt::NoPen);
     p.setBrush(color);
     p.drawRoundedRect(QRectF(size * 0.15, size * 0.44, size * 0.70, size * 0.48), size * 0.14, size * 0.14);
     return pm;
 }
 
-// A four-point sparkle: a slim vertical/horizontal diamond, concave edges.
+// A filled play triangle (9x10), drawn into a square so it centres in the slot.
+QPixmap playTrianglePixmap(int box, const QColor &color) {
+    QPixmap pm(box, box);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    const qreal ox = (box - 9) / 2.0, oy = (box - 10) / 2.0;
+    QPainterPath tri;
+    tri.moveTo(ox, oy);
+    tri.lineTo(ox + 9, oy + 5);
+    tri.lineTo(ox, oy + 10);
+    tri.closeSubpath();
+    p.drawPath(tri);
+    return pm;
+}
+
 void drawSparkle(QPainter &p, const QPointF &center, qreal radius) {
     const qreal waist = radius * 0.28;
     QPainterPath path;
@@ -138,12 +166,9 @@ void drawSparkle(QPainter &p, const QPointF &center, qreal radius) {
     p.drawPath(path);
 }
 
-// Spotify's Smart Shuffle mark: one large sparkle with a smaller one tucked
-// to its lower-right.
 QPixmap sparklePixmap(int size, const QColor &color) {
     QPixmap pm(size, size);
     pm.fill(Qt::transparent);
-
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setPen(Qt::NoPen);
@@ -155,10 +180,8 @@ QPixmap sparklePixmap(int size, const QColor &color) {
 
 QPixmap roundedThumbnail(const QPixmap &source, int targetSize, qreal radius) {
     QPixmap scaled = source.scaled(targetSize, targetSize, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-
     QPixmap result(targetSize, targetSize);
     result.fill(Qt::transparent);
-
     QPainter painter(&result);
     painter.setRenderHint(QPainter::Antialiasing, true);
     QPainterPath path;
@@ -209,27 +232,43 @@ QueueWindow::QueueWindow(QWidget *parent) : QWidget(parent), network(new QNetwor
     nowArtLabel = new QLabel(nowWidget);
     nowArtLabel->setFixedSize(kNowArtSize, kNowArtSize);
     nowArtLabel->setAlignment(Qt::AlignCenter);
-    nowArtLabel->setText("🎵");
+    nowArtLabel->setText(QStringLiteral("♪"));
     nowTitleLabel = new QLabel("Nothing playing", nowWidget);
     nowArtistLabel = new QLabel("Spotify", nowWidget);
     nowTimeLabel = new QLabel(nowWidget);
     nowTimeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     nowProgressBar = new QProgressBar(nowWidget);
     nowProgressBar->setTextVisible(false);
+    nowProgressBar->setFixedHeight(3);
     nowProgressBar->setRange(0, 1);
     nowProgressBar->setValue(0);
+
+    // "Locked" chip on the now-playing title line (replaces the corner padlock).
+    lockedChip = new QWidget(nowWidget);
+    lockedChip->setAttribute(Qt::WA_TransparentForMouseEvents);
+    QHBoxLayout *chipLayout = new QHBoxLayout(lockedChip);
+    chipLayout->setContentsMargins(theme::kSpace3, 3, theme::kSpace3, 3);
+    chipLayout->setSpacing(5);
+    lockedChipIcon = new QLabel(lockedChip);
+    lockedChipIcon->setFixedSize(10, 10);
+    lockedChipText = new QLabel(QStringLiteral("Locked"), lockedChip);
+    chipLayout->addWidget(lockedChipIcon);
+    chipLayout->addWidget(lockedChipText);
+    lockedChip->hide();
 
     nowTickTimer = new QTimer(this);
     nowTickTimer->setInterval(250);
     connect(nowTickTimer, &QTimer::timeout, this, &QueueWindow::updateNowPlayingTime);
 
-    lockIconLabel = new QLabel(containerWidget);
-    lockIconLabel->setFixedSize(kLockIconSize, kLockIconSize);
-    lockIconLabel->setStyleSheet("border: none; background: transparent;");
-    lockIconLabel->hide();
+    dividerWidget = new FadingRule(containerWidget);
 
     headerLabel = new QLabel("UP NEXT", containerWidget);
-    emptyLabel = new QLabel("Queue is empty", containerWidget);
+    headerCountLabel = new QLabel(containerWidget);
+    lockHintIconLabel = new QLabel(containerWidget);
+    lockHintIconLabel->setFixedSize(kHeaderIconSize, kHeaderIconSize);
+    lockHintTextLabel = new QLabel(QStringLiteral("Alt+L to lock"), containerWidget);
+    emptyLabel = new QLabel(QStringLiteral("Nothing queued. Songs you add in Spotify — or picked by Smart Shuffle — show up here."), containerWidget);
+    emptyLabel->setWordWrap(true);
 
     geometryAnimation = new QPropertyAnimation(this, "geometry", this);
     geometryAnimation->setDuration(animMs(kHeightAnimMs));
@@ -264,8 +303,6 @@ void QueueWindow::setNowPlaying(const QString &trackId, const QString &title, co
     bool fromList = false;
     if (shouldAnimate) {
         oldSnapshot = nowWidget->grab();
-        // `queue` still holds the pre-change list here (queueChanged arrives
-        // after trackChanged), so it tells us where the new song came from.
         for (const UpcomingTrack &t : queue) {
             if (t.trackId == trackId) {
                 fromList = true;
@@ -297,22 +334,31 @@ void QueueWindow::setNowPlaying(const QString &trackId, const QString &title, co
 }
 
 void QueueWindow::layoutNowContents() {
-    const int textX = kNowArtSize + 10;
+    const int textX = kNowArtSize + kNowGap;
     const int textW = qMax(60, nowWidget->width() - textX);
-    const int lockReserve = lockIconVisible() ? kLockIconSize + 6 : 0;
     nowArtLabel->move(0, (kNowHeight - kNowArtSize) / 2);
-    nowTitleLabel->setGeometry(textX, 4, qMax(60, textW - lockReserve), 18);
-    nowArtistLabel->setGeometry(textX, 22, textW, 15);
-    nowProgressBar->setGeometry(textX, 42, textW, 4);
-    nowTimeLabel->setGeometry(textX, 47, textW, 12);
+
+    // Reserve room on the title line for the "Locked" chip when it shows.
+    int chipReserve = 0;
+    if (lockedChipVisible()) {
+        lockedChip->adjustSize();
+        chipReserve = lockedChip->width() + theme::kSpace2;
+        lockedChip->move(textX + textW - lockedChip->width(), 2);
+        lockedChip->raise();
+    }
+    nowTitleLabel->setGeometry(textX, 2, qMax(40, textW - chipReserve), 20);
+    nowArtistLabel->setGeometry(textX, 24, textW, 16);
+
+    // Progress rail flexes; the time sits to its right.
+    const int timeW = qMin(textW / 2, QFontMetrics(nowTimeLabel->font()).horizontalAdvance("0:00 / 0:00") + 2);
+    nowProgressBar->setGeometry(textX, 46, qMax(20, textW - timeW - kRowContentGap), 3);
+    nowTimeLabel->setGeometry(textX + textW - timeW, 41, timeW, 14);
 }
 
 void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
-    const QPoint target(kMarginX, kMarginTop);
+    const QPoint target(kMargin, kMargin);
     const int offset = kRowEnterOffsetPx + 4;
 
-    // Ghost of the previous song drifts away in the direction of flow:
-    // up and out on skip, down toward the list on prev.
     QLabel *ghost = new QLabel(containerWidget);
     ghost->setAttribute(Qt::WA_TransparentForMouseEvents);
     ghost->setStyleSheet("border: none; background: transparent;");
@@ -338,8 +384,6 @@ void QueueWindow::animateNowSwap(bool upFlow, const QPixmap &oldSnapshot) {
     connect(ghostFade, &QPropertyAnimation::finished, ghost, &QWidget::deleteLater);
     ghostFade->start(QAbstractAnimation::DeleteWhenStopped);
 
-    // The new song enters from the side it came from: below (the list) on
-    // skip, above (history) on prev.
     if (nowSwapAnimation) {
         nowSwapAnimation->stop();
     }
@@ -398,27 +442,49 @@ void QueueWindow::updateNowPlayingTime() {
 
 void QueueWindow::applyOverlaySettings(const OverlaySettings &settings) {
     overlaySettings = settings;
-    containerWidget->setStyleSheet(QString("background-color: %1; border-radius: 12px; border: 1px solid %2;")
-        .arg(overlaySettings.backgroundColor, overlaySettings.borderColor));
-    headerLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-weight: bold; letter-spacing: 1px; border: none; background: transparent;")
-        .arg(overlaySettings.accentColor));
-    emptyLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;")
-        .arg(overlaySettings.secondaryTextColor));
-    nowTitleLabel->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 14px; border: none; background: transparent;")
-        .arg(overlaySettings.primaryTextColor));
-    nowArtistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;")
-        .arg(overlaySettings.secondaryTextColor));
-    nowTimeLabel->setStyleSheet(QString("color: %1; font-size: 10px; font-family: monospace; border: none; background: transparent;")
-        .arg(overlaySettings.mutedTextColor));
+    containerWidget->setStyleSheet(QString("background-color: %1; border-radius: %2px; border: 1px solid %3;")
+        .arg(overlaySettings.backgroundColor).arg(theme::kRadiusLg).arg(theme::kNeutral700));
+
+    headerLabel->setFont([]{ QFont f = theme::uiFont(10); f.setCapitalization(QFont::AllUppercase); f.setLetterSpacing(QFont::AbsoluteSpacing, 1.4); return f; }());
+    headerLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(overlaySettings.accentColor));
+    headerCountLabel->setFont(theme::uiFont(10, QFont::Normal, /*tabular=*/true));
+    headerCountLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+    QFont hintFont = theme::uiFont(10);
+    hintFont.setCapitalization(QFont::AllUppercase);
+    hintFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.6);
+    lockHintTextLabel->setFont(hintFont);
+    lockHintTextLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+    lockHintIconLabel->setPixmap(lockPixmap(kHeaderIconSize, QColor(theme::kNeutral600)));
+
+    emptyLabel->setFont(theme::uiFont(13));
+    emptyLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral500));
+
+    nowTitleLabel->setFont([]{ QFont f = theme::uiFont(16, QFont::Medium); f.setLetterSpacing(QFont::PercentageSpacing, 99); return f; }());
+    nowTitleLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
+    nowArtistLabel->setFont(theme::uiFont(13));
+    nowArtistLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral500));
+    nowTimeLabel->setFont(theme::uiFont(11, QFont::Normal, /*tabular=*/true));
+    nowTimeLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
     nowProgressBar->setStyleSheet(QString(
-        "QProgressBar { background-color: %1; border: none; border-radius: 2px; }"
-        "QProgressBar::chunk { background-color: %2; border-radius: 2px; }")
-        .arg(overlaySettings.borderColor, overlaySettings.progressBarColor));
+        "QProgressBar { background-color: %1; border: none; border-radius: 1px; }"
+        "QProgressBar::chunk { background-color: %2; border-radius: 1px; }")
+        .arg(theme::kNeutral800, overlaySettings.progressBarColor));
     if (nowArtLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        nowArtLabel->setStyleSheet(QString("border: none; border-radius: 6px; background-color: %1; color: %2; font-size: 22px;")
-            .arg(overlaySettings.borderColor, overlaySettings.accentColor));
+        nowArtLabel->setFont(theme::uiFont(22));
+        nowArtLabel->setStyleSheet(QString("border: none; border-radius: %1px; background-color: %2; color: %3;")
+            .arg(theme::kRadiusMd).arg(theme::kNeutral800, theme::kAccent700));
     }
-    lockIconLabel->setPixmap(lockPixmap(kLockIconSize, QColor(overlaySettings.accentColor)));
+
+    lockedChip->setStyleSheet(QString("background-color: %1; border-radius: 6px;").arg(theme::kAccent900));
+    lockedChipIcon->setPixmap(lockPixmap(10, QColor(theme::kAccent300)));
+    QFont chipFont = theme::uiFont(10, QFont::Medium);
+    chipFont.setCapitalization(QFont::AllUppercase);
+    chipFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.9);
+    lockedChipText->setFont(chipFont);
+    lockedChipText->setStyleSheet(QString("color: %1; background: transparent; border: none;").arg(theme::kAccent300));
+
+    static_cast<FadingRule *>(dividerWidget)->setColor(QColor(233, 233, 237, 41));
+
     for (const Row &row : rows) {
         styleRowLabels(row);
     }
@@ -430,8 +496,6 @@ void QueueWindow::applyQueueSettings(const QueueSettings &settings) {
     const int oldY = queueSettings.windowY;
     const bool wasLocked = queueSettings.locked;
     queueSettings = settings;
-    // Keep the live drag position authoritative; settings only override it
-    // when they carry a different stored spot (e.g. first apply after load).
     if (queueSettings.windowX != oldX || queueSettings.windowY != oldY) {
         applyStoredOrDefaultPosition();
     }
@@ -440,12 +504,9 @@ void QueueWindow::applyQueueSettings(const QueueSettings &settings) {
         dragging = false;
         resizingEdge = EdgeHit::None;
         setCursor(Qt::ArrowCursor);
-        // A click-through window never gets Leave events, so a row hovered at
-        // lock time would keep its highlight forever. Fade them all out now.
         for (Row &row : rows) {
             animateRowHover(row, false);
         }
-        // Changing a window flag hides the window; restore it without a fade.
         const bool wasVisible = isVisible();
         setWindowFlag(Qt::WindowTransparentForInput, queueSettings.locked);
         if (wasVisible && queueSettings.enabled) {
@@ -469,38 +530,40 @@ int QueueWindow::effectiveWidth() const {
 }
 
 int QueueWindow::headerHeight() const {
-    return headerLabel->sizeHint().height();
+    return qMax(kHeaderIconSize, headerLabel->sizeHint().height());
 }
 
 int QueueWindow::nowBlockHeight() const {
-    return queueSettings.showNowPlaying ? kNowHeight + kNowGap : 0;
+    return queueSettings.showNowPlaying ? kNowHeight : 0;
 }
 
-bool QueueWindow::lockIconVisible() const {
-    return queueSettings.locked && queueSettings.showLockIcon;
+int QueueWindow::dividerBlockHeight() const {
+    return queueSettings.showNowPlaying ? (kDividerMarginTop + 1 + kDividerMarginBottom) : 0;
+}
+
+bool QueueWindow::lockedChipVisible() const {
+    return queueSettings.locked && queueSettings.showLockIcon && queueSettings.showNowPlaying;
 }
 
 int QueueWindow::rowY(int index) const {
-    return kMarginTop + nowBlockHeight() + headerHeight() + kHeaderGap + index * (kRowHeight + kRowGap);
+    return kMargin + nowBlockHeight() + dividerBlockHeight() + headerHeight() + kHeaderGap + index * (kRowHeight + kRowGap);
 }
 
 int QueueWindow::rowWidth() const {
-    return qMax(60, width() - 2 * kMarginX);
+    return qMax(60, width() - 2 * kMargin);
 }
 
 int QueueWindow::contentHeightFor(int rowCount) const {
-    const int top = kMarginTop + nowBlockHeight() + headerHeight() + kHeaderGap;
+    const int top = kMargin + nowBlockHeight() + dividerBlockHeight() + headerHeight() + kHeaderGap;
     if (rowCount <= 0) {
-        return top + emptyLabel->sizeHint().height() + kMarginBottom;
+        return top + emptyLabel->heightForWidth(rowWidth()) + kMargin;
     }
-    return top + rowCount * kRowHeight + (rowCount - 1) * kRowGap + kMarginBottom;
+    return top + rowCount * kRowHeight + (rowCount - 1) * kRowGap + kMargin;
 }
 
 void QueueWindow::refreshRows(bool animate) {
     const int shown = qMin(int(queue.size()), queueSettings.maxSongs);
 
-    // Duplicate-aware keys: the same track queued twice gets #0, #1... so a
-    // shift of the list still matches each on-screen row to one queue entry.
     QHash<QString, int> ordinal;
     QStringList targetKeys;
     for (int i = 0; i < shown; ++i) {
@@ -513,10 +576,6 @@ void QueueWindow::refreshRows(bool animate) {
         oldIndexByKey.insert(rows.at(i).key, i);
     }
 
-    // Which way is the list flowing? Skipping forward shifts survivors up
-    // (direction -1); going back to the previous song shifts them down (+1).
-    // Entering and exiting rows follow that same direction so the whole list
-    // reads as one motion instead of rows crossing through each other.
     int shiftSum = 0;
     for (int i = 0; i < shown; ++i) {
         const auto oldIndex = oldIndexByKey.constFind(targetKeys.at(i));
@@ -544,7 +603,7 @@ void QueueWindow::refreshRows(bool animate) {
             if (animate) {
                 fadeInRowAt(row, i, direction);
             } else {
-                row.widget->move(kMarginX, rowY(i));
+                row.widget->move(kMargin, rowY(i));
                 row.widget->show();
             }
             newRows.append(row);
@@ -569,32 +628,39 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     row.widget = new QWidget(containerWidget);
     row.widget->setFixedSize(rowWidth(), kRowHeight);
     row.widget->setStyleSheet("background: transparent; border: none;");
-    // Hover moves stop at the row widget (they don't bubble up like clicks
-    // do), so the click affordance has to live on the row itself.
     row.widget->setCursor(Qt::PointingHandCursor);
     row.widget->installEventFilter(this);
 
-    // Sits behind the labels (created first = lowest); fades in on hover.
     row.hoverBg = new HoverHighlight(row.widget);
     row.hoverBg->setGeometry(row.widget->rect());
     row.hoverBg->lower();
 
     QHBoxLayout *rowLayout = new QHBoxLayout(row.widget);
-    // Inner padding keeps the content (index and duration especially) from
-    // sitting flush against the hover highlight's rounded edges.
-    rowLayout->setContentsMargins(4, 0, 2, 4);
-    rowLayout->setSpacing(8);
+    rowLayout->setContentsMargins(theme::kSpace3, 0, theme::kSpace3, 0);
+    rowLayout->setSpacing(kRowContentGap);
 
-    row.indexLabel = new QLabel(row.widget);
-    row.indexLabel->setFixedWidth(22);
-    row.indexLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    // Index slot: the row number cross-fades to a play glyph on hover.
+    row.indexSlot = new QWidget(row.widget);
+    row.indexSlot->setFixedSize(kIndexSlot, 20);
+    row.indexLabel = new QLabel(row.indexSlot);
+    row.indexLabel->setGeometry(0, 0, kIndexSlot, 20);
+    row.indexLabel->setAlignment(Qt::AlignCenter);
+    row.playLabel = new QLabel(row.indexSlot);
+    row.playLabel->setGeometry(0, 0, kIndexSlot, 20);
+    row.playLabel->setAlignment(Qt::AlignCenter);
+    row.playLabel->setPixmap(playTrianglePixmap(kIndexSlot, QColor(theme::kAccent400)));
+    QGraphicsOpacityEffect *indexEffect = new QGraphicsOpacityEffect(row.indexLabel);
+    indexEffect->setOpacity(1.0);
+    row.indexLabel->setGraphicsEffect(indexEffect);
+    QGraphicsOpacityEffect *playEffect = new QGraphicsOpacityEffect(row.playLabel);
+    playEffect->setOpacity(0.0);
+    row.playLabel->setGraphicsEffect(playEffect);
 
     row.artLabel = new QLabel(row.widget);
     row.artLabel->setFixedSize(kArtSize, kArtSize);
     row.artLabel->setAlignment(Qt::AlignCenter);
-    row.artLabel->setText("♪");
+    row.artLabel->setText(QStringLiteral("♪"));
     row.artUrl = track.artUrl;
-
 
     QVBoxLayout *textLayout = new QVBoxLayout();
     textLayout->setContentsMargins(0, 0, 0, 0);
@@ -605,18 +671,20 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
     textLayout->addWidget(row.artistLabel);
 
     row.sparkleLabel = new QLabel(row.widget);
-    row.sparkleLabel->setFixedWidth(kRowIconSize);
+    row.sparkleLabel->setFixedWidth(kRowBadgeSize);
     row.sparkleLabel->setAlignment(Qt::AlignCenter);
     row.sparkleLabel->hide();
 
     row.likeLabel = new QLabel(row.widget);
-    row.likeLabel->setFixedWidth(kRowIconSize);
+    row.likeLabel->setFixedWidth(kRowBadgeSize);
     row.likeLabel->setAlignment(Qt::AlignCenter);
+    row.likeLabel->hide();
 
     row.durationLabel = new QLabel(row.widget);
-    row.durationLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
+    row.durationLabel->setMinimumWidth(30);
+    row.durationLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
-    rowLayout->addWidget(row.indexLabel, 0);
+    rowLayout->addWidget(row.indexSlot, 0);
     rowLayout->addWidget(row.artLabel, 0);
     rowLayout->addLayout(textLayout, 1);
     rowLayout->addWidget(row.sparkleLabel, 0);
@@ -637,29 +705,37 @@ QueueWindow::Row QueueWindow::makeRow(const UpcomingTrack &track) {
 void QueueWindow::styleRowLabels(const Row &row) const {
     QColor hoverColor(queueSettings.hoverColor);
     if (!hoverColor.isValid()) {
-        hoverColor = QColor("#888888");
+        hoverColor = QColor(theme::kText);
     }
     static_cast<HoverHighlight *>(row.hoverBg)->setColor(hoverColor);
-    row.indexLabel->setStyleSheet(QString("color: %1; font-size: 12px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
-    row.titleLabel->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
-    row.artistLabel->setStyleSheet(QString("color: %1; font-size: 12px; border: none; background: transparent;").arg(overlaySettings.secondaryTextColor));
-    row.durationLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-family: monospace; border: none; background: transparent;").arg(overlaySettings.mutedTextColor));
+    row.indexLabel->setFont(theme::uiFont(12, QFont::Normal, /*tabular=*/true));
+    row.indexLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+    row.titleLabel->setFont(theme::uiFont(14, QFont::Medium));
+    row.titleLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(overlaySettings.primaryTextColor));
+    row.artistLabel->setFont(theme::uiFont(12));
+    row.artistLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral500));
+    row.durationLabel->setFont(theme::uiFont(11, QFont::Normal, /*tabular=*/true));
+    row.durationLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
     if (row.artLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        row.artLabel->setStyleSheet(QString("border: none; border-radius: 6px; background-color: %1; color: %2; font-size: 16px;").arg(overlaySettings.borderColor, overlaySettings.accentColor));
+        row.artLabel->setFont(theme::uiFont(16));
+        row.artLabel->setStyleSheet(QString("border: none; border-radius: %1px; background-color: %2; color: %3;")
+            .arg(theme::kRadiusMd).arg(theme::kNeutral800, theme::kAccent800));
     }
     refreshRowBadges(row);
 }
 
 void QueueWindow::refreshRowBadges(const Row &row) const {
-    // One badge slot: the sparkle stands in for a Smart Shuffle recommendation
-    // (which can't be liked), but a liked heart always takes precedence.
+    // One badge slot: a Smart Shuffle sparkle when the recommendation can't be
+    // liked, else a liked heart. When neither applies, nothing shows — the empty
+    // outline heart is dropped, so a badge always means something.
     const bool showSparkle = row.smartShuffle && !row.liked;
-    row.sparkleLabel->setPixmap(sparklePixmap(kRowIconSize, QColor(overlaySettings.accentColor)));
+    row.sparkleLabel->setPixmap(sparklePixmap(kRowBadgeSize, QColor(overlaySettings.accentColor)));
     row.sparkleLabel->setVisible(showSparkle);
-    row.likeLabel->setText(row.liked ? "♥" : "♡");
-    row.likeLabel->setStyleSheet(QString("color: %1; font-size: 13px; border: none; background: transparent;")
-        .arg(row.liked ? overlaySettings.accentColor : overlaySettings.mutedTextColor));
-    row.likeLabel->setVisible(!showSparkle);
+    if (row.liked) {
+        row.likeLabel->setText(QStringLiteral("♥"));
+        row.likeLabel->setStyleSheet(QString("color: %1; font-size: 13px; border: none; background: transparent;").arg(overlaySettings.accentColor));
+    }
+    row.likeLabel->setVisible(row.liked && !showSparkle);
 }
 
 void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int index) {
@@ -667,7 +743,7 @@ void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int ind
     row.fullArtist = track.artist.isEmpty() ? QStringLiteral("…") : track.artist;
     row.liked = track.liked;
     row.smartShuffle = track.smartShuffle;
-    row.indexLabel->setText(QString::number(index + 1) + ".");
+    row.indexLabel->setText(QString::number(index + 1)); // no trailing period
     row.durationLabel->setText(track.durationMs > 0 ? formatDuration(track.durationMs) : QString());
     if (row.artUrl != track.artUrl && !track.artUrl.isEmpty()) {
         row.artUrl = track.artUrl;
@@ -678,7 +754,7 @@ void QueueWindow::updateRowContent(Row &row, const UpcomingTrack &track, int ind
 
 void QueueWindow::animateRowHover(Row &row, bool hovered) {
     if (row.hovered == hovered) {
-        return; // duplicate enter/leave; don't restart the fade
+        return;
     }
     row.hovered = hovered;
 
@@ -687,20 +763,29 @@ void QueueWindow::animateRowHover(Row &row, bool hovered) {
     }
 
     HoverHighlight *highlight = static_cast<HoverHighlight *>(row.hoverBg);
+    QLabel *indexLabel = row.indexLabel;
+    QLabel *playLabel = row.playLabel;
     QVariantAnimation *fade = new QVariantAnimation(highlight);
     fade->setDuration(hovered ? 150 : 220);
     fade->setEasingCurve(QEasingCurve::OutQuad);
     fade->setStartValue(highlight->alphaFraction());
     fade->setEndValue(hovered ? 1.0 : 0.0);
-    connect(fade, &QVariantAnimation::valueChanged, highlight, [highlight](const QVariant &value) {
-        highlight->setAlphaFraction(value.toReal());
+    connect(fade, &QVariantAnimation::valueChanged, highlight, [highlight, indexLabel, playLabel](const QVariant &value) {
+        const qreal v = value.toReal();
+        highlight->setAlphaFraction(v);
+        if (auto *ie = qobject_cast<QGraphicsOpacityEffect *>(indexLabel->graphicsEffect())) {
+            ie->setOpacity(1.0 - v);
+        }
+        if (auto *pe = qobject_cast<QGraphicsOpacityEffect *>(playLabel->graphicsEffect())) {
+            pe->setOpacity(v);
+        }
     });
     row.hoverAnimation = fade;
     fade->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void QueueWindow::moveRowTo(Row &row, int index, bool animate) {
-    const QPoint target(kMarginX, rowY(index));
+    const QPoint target(kMargin, rowY(index));
     if (row.posAnimation) {
         row.posAnimation->stop();
     }
@@ -719,9 +804,7 @@ void QueueWindow::moveRowTo(Row &row, int index, bool animate) {
 }
 
 void QueueWindow::fadeInRowAt(Row &row, int index, int direction) {
-    const QPoint target(kMarginX, rowY(index));
-    // Enter from the side the list is flowing away from: from above when the
-    // survivors slide down (prev song), from below when they slide up.
+    const QPoint target(kMargin, rowY(index));
     row.widget->move(target - QPoint(0, direction * kRowEnterOffsetPx));
     row.widget->show();
 
@@ -754,7 +837,6 @@ void QueueWindow::discardRow(const Row &row, bool animate, int direction) {
         return;
     }
 
-    // Removed rows keep drifting the way the list is moving and dissolve.
     if (QGraphicsOpacityEffect *effect = opacityEffectOf(widget)) {
         QPropertyAnimation *fade = new QPropertyAnimation(effect, "opacity", widget);
         fade->setDuration(animMs(kRowFadeOutMs));
@@ -779,34 +861,57 @@ void QueueWindow::discardRow(const Row &row, bool animate, int direction) {
 void QueueWindow::relayoutStatics() {
     containerWidget->setGeometry(rect());
 
-    // Now-playing block: art on the left, title/artist/progress to the right.
     const bool showNow = queueSettings.showNowPlaying;
     nowWidget->setVisible(showNow);
-    // The lock badge occupies the window's top-right corner. Whatever shares
-    // that line (the now-playing title, or the header when the now block is
-    // hidden) gets its width trimmed so it can't run under the badge — this
-    // matters for RTL text (e.g. Arabic titles), which renders right-aligned.
-    lockIconLabel->setVisible(lockIconVisible());
-    const int lockReserve = lockIconVisible() ? kLockIconSize + 6 : 0;
-    lockIconLabel->move(width() - kMarginX - kLockIconSize, kMarginTop + 2);
-    lockIconLabel->raise();
+    lockedChip->setVisible(lockedChipVisible());
 
     if (showNow) {
-        // Don't yank the block around mid slide-in; the animation owns its
-        // position and always lands on this same target.
         if (!nowSwapAnimation) {
-            nowWidget->setGeometry(kMarginX, kMarginTop, rowWidth(), kNowHeight);
+            nowWidget->setGeometry(kMargin, kMargin, rowWidth(), kNowHeight);
         } else {
             nowWidget->resize(rowWidth(), kNowHeight);
         }
         layoutNowContents();
     }
 
-    headerLabel->setGeometry(kMarginX, kMarginTop + nowBlockHeight(), rowWidth() - (showNow ? 0 : lockReserve), headerHeight());
-    emptyLabel->setGeometry(kMarginX, rowY(0), rowWidth(), emptyLabel->sizeHint().height());
+    dividerWidget->setVisible(showNow);
+    if (showNow) {
+        dividerWidget->setGeometry(kMargin, kMargin + nowBlockHeight() + kDividerMarginTop, rowWidth(), 1);
+    }
+
+    // Header row: "UP NEXT" + count on the left, the lock hint on the right.
+    const int headerY = kMargin + nowBlockHeight() + dividerBlockHeight();
+    const int hH = headerHeight();
+    int x = kMargin;
+    const int labelW = headerLabel->sizeHint().width();
+    headerLabel->setGeometry(x, headerY, labelW, hH);
+    x += labelW + theme::kSpace2;
+    const int countW = qMax(8, headerCountLabel->sizeHint().width());
+    headerCountLabel->setGeometry(x, headerY, countW, hH);
+
+    const int hintTextW = lockHintTextLabel->sizeHint().width();
+    const int hintW = kHeaderIconSize + 5 + hintTextW;
+    const int hx = width() - kMargin - hintW;
+    const bool hintFits = hx > x + countW + theme::kSpace3;
+    lockHintIconLabel->setVisible(hintFits);
+    lockHintTextLabel->setVisible(hintFits);
+    if (hintFits) {
+        lockHintIconLabel->move(hx, headerY + (hH - kHeaderIconSize) / 2);
+        lockHintTextLabel->setGeometry(hx + kHeaderIconSize + 5, headerY, hintTextW, hH);
+    }
+
+    emptyLabel->setGeometry(kMargin + theme::kSpace3, rowY(0), qMax(60, rowWidth() - 2 * theme::kSpace3), emptyLabel->heightForWidth(rowWidth()));
+
     for (Row &row : rows) {
         row.widget->setFixedSize(rowWidth(), kRowHeight);
         row.hoverBg->setGeometry(row.widget->rect());
+        // Locked windows are click-through; dim the rows to signal they aren't
+        // clickable right now.
+        if (auto *e = opacityEffectOf(row.widget)) {
+            if (e->opacity() >= 0.99 || e->opacity() == 0.75) {
+                e->setOpacity(queueSettings.locked ? 0.75 : 1.0);
+            }
+        }
     }
 }
 
@@ -831,20 +936,26 @@ void QueueWindow::animateToContentHeight() {
 }
 
 void QueueWindow::updateElides() {
-    // Text budget: row width minus row padding, index column, album art,
-    // the single heart/sparkle badge, duration column and layout spacing.
-    // QLabel doesn't elide on its own.
-    const int textBudget = qMax(60, rowWidth() - 16 - 22 - kArtSize - (kRowIconSize + 8) - 44 - 24);
-
+    // Text budget: row width minus padding, index column, album art, badge,
+    // duration column and the layout spacing. QLabel doesn't elide on its own.
+    const int textBudget = qMax(60, rowWidth() - 2 * theme::kSpace3 - kIndexSlot - kArtSize
+                                        - kRowBadgeSize - 30 - 4 * kRowContentGap);
     for (Row &row : rows) {
         row.titleLabel->setText(QFontMetrics(row.titleLabel->font()).elidedText(row.fullTitle, Qt::ElideRight, textBudget));
         row.artistLabel->setText(QFontMetrics(row.artistLabel->font()).elidedText(row.fullArtist, Qt::ElideRight, textBudget));
     }
 
-    const int nowBudget = qMax(60, width() - (kMarginX + kNowArtSize + 10) - kMarginX);
-    const int titleBudget = qMax(60, nowBudget - (lockIconVisible() ? kLockIconSize + 6 : 0));
+    const int nowBudget = qMax(60, width() - (kMargin + kNowArtSize + kNowGap) - kMargin);
+    int chipReserve = 0;
+    if (lockedChipVisible()) {
+        lockedChip->adjustSize();
+        chipReserve = lockedChip->width() + theme::kSpace2;
+    }
+    const int titleBudget = qMax(40, nowBudget - chipReserve);
     nowTitleLabel->setText(QFontMetrics(nowTitleLabel->font()).elidedText(nowTitle.isEmpty() ? QStringLiteral("Nothing playing") : nowTitle, Qt::ElideRight, titleBudget));
     nowArtistLabel->setText(QFontMetrics(nowArtistLabel->font()).elidedText(nowArtist.isEmpty() ? QStringLiteral("Spotify") : nowArtist, Qt::ElideRight, nowBudget));
+
+    headerCountLabel->setText(rows.isEmpty() ? QString() : QString::number(rows.size()));
 }
 
 void QueueWindow::setArtOnLabel(QLabel *artLabel, const QString &artUrl, int size) {
@@ -856,7 +967,7 @@ void QueueWindow::setArtOnLabel(QLabel *artLabel, const QString &artUrl, int siz
     const auto cached = artCache.constFind(cacheKey);
     if (cached != artCache.constEnd()) {
         artLabel->setText("");
-        artLabel->setStyleSheet("border: none; border-radius: 6px; background: transparent;");
+        artLabel->setStyleSheet("border: none; border-radius: 8px; background: transparent;");
         artLabel->setPixmap(*cached);
         return;
     }
@@ -872,17 +983,14 @@ void QueueWindow::setArtOnLabel(QLabel *artLabel, const QString &artUrl, int siz
         if (!pixmap.loadFromData(reply->readAll())) {
             return;
         }
-
         if (artCache.size() > 150) {
             artCache.clear();
         }
-        const QPixmap rounded = roundedThumbnail(pixmap, size, 6.0);
+        const QPixmap rounded = roundedThumbnail(pixmap, size, theme::kRadiusMd);
         artCache.insert(cacheKey, rounded);
-
-        // The row may have been discarded while the download was in flight.
         if (target) {
             target->setText("");
-            target->setStyleSheet("border: none; border-radius: 6px; background: transparent;");
+            target->setStyleSheet("border: none; border-radius: 8px; background: transparent;");
             target->setPixmap(rounded);
         }
     });
@@ -913,7 +1021,6 @@ void QueueWindow::fadeTo(qreal targetOpacity, bool hideWhenDone) {
 
 void QueueWindow::applyStoredOrDefaultPosition() {
     if (queueSettings.windowX != INT_MIN && queueSettings.windowY != INT_MIN) {
-        // Only restore a spot that is still on some screen (monitor layouts change).
         const QPoint stored(queueSettings.windowX, queueSettings.windowY);
         if (QGuiApplication::screenAt(stored + QPoint(20, 20))) {
             move(stored);
@@ -940,7 +1047,6 @@ QueueWindow::EdgeHit QueueWindow::edgeHitTest(const QPoint &windowPos) const {
 }
 
 int QueueWindow::rowIndexAt(const QPoint &windowPos) const {
-    // containerWidget fills the window, so window coords match row coords.
     for (int i = 0; i < rows.size(); ++i) {
         if (rows.at(i).widget->geometry().contains(windowPos)) {
             return i;
@@ -1036,9 +1142,6 @@ void QueueWindow::mouseReleaseEvent(QMouseEvent *event) {
         }
         emit windowMoved(pos());
 
-        // A press that never travelled is a click, not a drag: activate the
-        // row under the cursor. (Locked mode never gets here — the window is
-        // transparent for input entirely.)
         const bool wasClick = !wasResizing &&
             (event->globalPosition().toPoint() - pressGlobalPos).manhattanLength() < 5;
         if (wasClick) {

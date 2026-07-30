@@ -6,7 +6,9 @@
 #include "settings/app_settings.h"
 #include "ui/settings_dialog.h"
 #include "ui/queue_window.h"
+#include "ui/theme.h"
 #include <QMessageBox>
+#include <QFont>
 #include <QMetaObject>
 #include <QIcon>
 #include <QDir>
@@ -28,9 +30,9 @@ void configureMacApplicationBehavior();
 namespace {
 QString bundledAppIconPath() {
 #ifdef __APPLE__
-    return QDir(QCoreApplication::applicationDirPath()).filePath("../Resources/app_icon.png");
+    return QDir(QCoreApplication::applicationDirPath()).filePath("../Resources/icon.png");
 #else
-    return QDir(QCoreApplication::applicationDirPath()).filePath("app_icon.png");
+    return QDir(QCoreApplication::applicationDirPath()).filePath("icon.png");
 #endif
 }
 
@@ -111,6 +113,15 @@ int main(int argc, char *argv[]) {
     app.setQuitOnLastWindowClosed(false);
     qInstallMessageHandler(appMessageHandler);
     app.setWindowIcon(QIcon(bundledAppIconPath()));
+
+    // Ship Inter (bundled via the Qt resource system) as the UI font so every
+    // surface matches the Nocturne design; fall back to the platform UI font if
+    // the resource is missing.
+    if (const QString interFamily = theme::fontFamily(); !interFamily.isEmpty()) {
+        QFont appFont = app.font();
+        appFont.setFamily(interFamily);
+        app.setFont(appFont);
+    }
 #ifdef __APPLE__
     configureMacApplicationBehavior();
 #endif
@@ -128,6 +139,11 @@ int main(int argc, char *argv[]) {
     volHandler.applyKeybindSettings(settingsDialog.keybindSettings());
     queueWindow.applyOverlaySettings(settingsDialog.overlaySettings());
     queueWindow.applyQueueSettings(settingsDialog.queueSettings());
+    {
+        const QueueSettings qs = settingsDialog.queueSettings();
+        tray.setQueueEnabled(qs.enabled);
+        tray.setQueueLocked(qs.locked);
+    }
 
     int currentVolume = 50;
     QString currentTrack = "Loading...";
@@ -176,7 +192,7 @@ int main(int argc, char *argv[]) {
         osd.setLikedState(spotify.isTrackLiked(trackId), spotify.isCurrentTrackSmartShuffle());
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
         queueWindow.setNowPlaying(trackId, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying);
-        tray.updateTrackInfo(currentTrack, currentArtist);
+        tray.updateNowPlaying(currentTrack, currentArtist, currentArtUrl, spotify.isTrackLiked(trackId));
     });
 
 
@@ -217,6 +233,8 @@ int main(int argc, char *argv[]) {
         const QueueSettings settings = settingsDialog.queueSettings();
         AppSettings::saveQueueSettings(settings);
         queueWindow.applyQueueSettings(settings);
+        tray.setQueueEnabled(settings.enabled);
+        tray.setQueueLocked(settings.locked);
     });
 
     QObject::connect(&spotify, &SpotifyClient::queueChanged, &queueWindow, &QueueWindow::setQueue);
@@ -240,32 +258,39 @@ int main(int argc, char *argv[]) {
 
     QObject::connect(&spotify, &SpotifyClient::likedSongsLoaded, [&]() {
         osd.setLikedState(spotify.isTrackLiked(currentTrackId), spotify.isCurrentTrackSmartShuffle());
+        tray.updateNowPlaying(currentTrack, currentArtist, currentArtUrl, spotify.isTrackLiked(currentTrackId));
     });
 
     QObject::connect(&spotify, &SpotifyClient::trackLikeFinished, [&](bool success, bool liked) {
         if (success) {
             osd.setLikedState(liked, spotify.isCurrentTrackSmartShuffle());
+            tray.updateNowPlaying(currentTrack, currentArtist, currentArtUrl, liked);
         }
         osd.showVolume(currentVolume, currentTrack, currentArtist, currentArtUrl, estimatedProgressNow(), currentDuration, currentIsPlaying, currentVolumeControlSupported);
     });
 
-    QObject::connect(&volHandler, &VolumeHandler::toggleQueueLockRequested, [&]() {
+    auto toggleQueueLock = [&]() {
         QueueSettings settings = settingsDialog.queueSettings();
         settings.locked = !settings.locked;
         AppSettings::saveQueueSettings(settings);
         queueWindow.applyQueueSettings(settings);
+        tray.setQueueLocked(settings.locked);
         const QSignalBlocker blocker(&settingsDialog);
         settingsDialog.setQueueSettings(settings);
-    });
-
-    QObject::connect(&volHandler, &VolumeHandler::toggleQueueShowRequested, [&]() {
+    };
+    auto toggleQueueShow = [&]() {
         QueueSettings settings = settingsDialog.queueSettings();
         settings.enabled = !settings.enabled;
         AppSettings::saveQueueSettings(settings);
         queueWindow.applyQueueSettings(settings);
+        tray.setQueueEnabled(settings.enabled);
         const QSignalBlocker blocker(&settingsDialog);
         settingsDialog.setQueueSettings(settings);
-    });
+    };
+    QObject::connect(&volHandler, &VolumeHandler::toggleQueueLockRequested, toggleQueueLock);
+    QObject::connect(&volHandler, &VolumeHandler::toggleQueueShowRequested, toggleQueueShow);
+    QObject::connect(&tray, &TrayManager::lockToggled, toggleQueueLock);
+    QObject::connect(&tray, &TrayManager::showUpNextToggled, toggleQueueShow);
 
     QObject::connect(&queueWindow, &QueueWindow::windowResized, [&](int windowWidth) {
         QueueSettings settings = settingsDialog.queueSettings();

@@ -1,25 +1,32 @@
 #include "settings_dialog.h"
+#include "theme.h"
 #include "spotify/spotify_client.h"
 #include "key_capture_button.h"
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
-#include <QDialogButtonBox>
-#include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPushButton>
-#include <QSpinBox>
-#include <QTabWidget>
-#include <QVBoxLayout>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QSpinBox>
+#include <QStackedWidget>
+#include <QVBoxLayout>
 #include <cmath>
+#include <functional>
 
 namespace {
-// WCAG relative luminance + contrast ratio, for warning about unreadable
-// user-chosen text colors.
+// WCAG relative luminance + contrast ratio, for the readable-text tag.
 double channelLuminance(int c8) {
     const double c = c8 / 255.0;
     return c <= 0.03928 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
@@ -35,239 +42,926 @@ double contrastRatio(const QColor &a, const QColor &b) {
     return la > lb ? la / lb : lb / la;
 }
 
-// Fixed dark theme for the settings window, so it matches the overlays instead
-// of the plain system widget style. Independent of the (user-themeable)
-// overlay colors.
-constexpr auto kSettingsStyle = R"(
-QDialog { background-color: #181818; }
-QWidget { color: #e8e8e8; font-size: 12px; }
-QLabel { color: #cfcfcf; background: transparent; }
-QTabWidget::pane { border: 1px solid #303030; border-radius: 8px; top: -1px; background: #1e1e1e; }
-QTabBar::tab {
-    background: transparent; color: #9a9a9a; padding: 7px 16px; margin-right: 2px;
-    border-top-left-radius: 6px; border-top-right-radius: 6px;
+QLabel *heading(const QString &text, QWidget *parent) {
+    QLabel *l = new QLabel(text, parent);
+    l->setFont(theme::uiFont(19, QFont::Medium));
+    l->setStyleSheet(QString("color: %1; background: transparent;").arg(theme::kText));
+    return l;
 }
-QTabBar::tab:hover { color: #e8e8e8; }
-QTabBar::tab:selected { background: #1e1e1e; color: #1DB954; border-bottom: 2px solid #1DB954; }
-QLineEdit, QSpinBox {
-    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
-    padding: 5px 8px; color: #f0f0f0; selection-background-color: #1DB954;
+QLabel *subline(const QString &text, QWidget *parent) {
+    QLabel *l = new QLabel(text, parent);
+    l->setWordWrap(true);
+    l->setFont(theme::uiFont(12));
+    l->setStyleSheet(QString("color: %1; background: transparent;").arg(theme::kNeutral500));
+    return l;
 }
-QLineEdit:focus, QSpinBox:focus { border: 1px solid #1DB954; }
-QPushButton {
-    background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
-    padding: 6px 14px; color: #f0f0f0;
-}
-QPushButton:hover { background: #333333; border-color: #4a4a4a; }
-QPushButton:pressed, QPushButton:checked { background: #1DB954; border-color: #1DB954; color: #06130b; }
-QCheckBox { spacing: 8px; color: #d8d8d8; background: transparent; }
-QCheckBox::indicator {
-    width: 16px; height: 16px; border-radius: 4px;
-    border: 1px solid #4a4a4a; background: #2a2a2a;
-}
-QCheckBox::indicator:checked { background: #1DB954; border-color: #1DB954; }
-QDialogButtonBox QPushButton { min-width: 72px; }
-)";
 
-QWidget *createRow(const QString &labelText, QWidget *fieldWidget, QWidget *parent = nullptr) {
-    QWidget *row = new QWidget(parent);
-    QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
+QString outlinedPrimaryQss() {
+    return QString(
+        "QPushButton { background: transparent; border: 1px solid %1; border-radius: %2px;"
+        " padding: 6px 14px; color: %1; }"
+        "QPushButton:hover { background: rgba(145,132,217,0.12); }"
+        "QPushButton:pressed { background: rgba(145,132,217,0.22); }"
+        "QPushButton:disabled { color: %3; border-color: %3; }")
+        .arg(theme::kAccent).arg(theme::kRadiusMd).arg(theme::kNeutral700);
+}
+QString secondaryQss() {
+    return QString(
+        "QPushButton { background: transparent; border: 1px solid %1; border-radius: %2px;"
+        " padding: 6px 14px; color: %3; }"
+        "QPushButton:hover { background: rgba(233,233,237,0.07); }")
+        .arg(theme::kDivider).arg(theme::kRadiusMd).arg(theme::kText);
+}
+QString hexInputQss() {
+    return QString(
+        "QLineEdit { background: %1; border: 1px solid %2; border-radius: %3px; padding: 4px 8px;"
+        " color: %4; font-family: 'Consolas','Menlo',monospace; font-size: 12px; }"
+        "QLineEdit:focus { border: 1px solid %5; }")
+        .arg(theme::kSurface, theme::kDivider).arg(theme::kRadiusMd).arg(theme::kText, theme::kAccent);
+}
+QString chipSpinQss() {
+    return QString(
+        "QSpinBox { background: %1; border: 1px solid %2; border-radius: %3px; padding: 2px 8px;"
+        " color: %4; }"
+        "QSpinBox::up-button, QSpinBox::down-button { width: 0; height: 0; border: none; }")
+        .arg(theme::kSurface, theme::kDivider).arg(theme::kRadiusSm).arg(theme::kText);
+}
 
-    QLabel *label = new QLabel(labelText, row);
-    label->setMinimumWidth(120);
-    if (QLabel *textLabel = qobject_cast<QLabel *>(fieldWidget)) {
-        textLabel->setWordWrap(true);
+// The mini overlay rendered inside a preset card: an art block + three bars.
+class PresetMini : public QWidget {
+public:
+    PresetMini(const QString &ground, const QString &art, const QString &text,
+               const QString &secondary, const QString &accent, QWidget *parent = nullptr)
+        : QWidget(parent), cGround(ground), cArt(art), cText(text), cSecondary(secondary), cAccent(accent) {
+        setFixedHeight(44);
+        setMinimumWidth(120);
     }
 
-    layout->addWidget(label);
-    layout->addWidget(fieldWidget, 1);
-    return row;
-}
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF r = rect();
+        QPainterPath clip;
+        clip.addRoundedRect(r, theme::kRadiusSm, theme::kRadiusSm);
+        p.setClipPath(clip);
+        p.fillRect(r, cGround);
 
-QLabel *createColorPreview(QWidget *parent = nullptr) {
-    QLabel *preview = new QLabel(parent);
-    preview->setFixedSize(28, 20);
-    preview->setFrameShape(QFrame::StyledPanel);
-    preview->setFrameShadow(QFrame::Sunken);
-    return preview;
-}
-}
+        const qreal pad = 7;
+        QRectF art(pad, pad, 30, 30);
+        p.setBrush(cArt);
+        p.setPen(Qt::NoPen);
+        p.drawRoundedRect(art, 4, 4);
+
+        const qreal bx = art.right() + 6;
+        const qreal bw = r.width() - bx - pad;
+        p.setBrush(cText);
+        p.drawRoundedRect(QRectF(bx, pad + 3, bw * 0.7, 5), 2, 2);
+        p.setBrush(cSecondary);
+        p.drawRoundedRect(QRectF(bx, pad + 14, bw * 0.45, 4), 2, 2);
+        p.setBrush(cAccent);
+        p.drawRoundedRect(QRectF(bx, pad + 23, bw, 4), 2, 2);
+    }
+
+private:
+    QColor cGround, cArt, cText, cSecondary, cAccent;
+};
+
+// A clickable colour swatch with a selection ring.
+class Swatch : public QWidget {
+public:
+    explicit Swatch(const QString &hex, QWidget *parent = nullptr) : QWidget(parent), hexStr(hex) {
+        setFixedSize(26, 26);
+        setCursor(Qt::PointingHandCursor);
+    }
+    QString hex() const { return hexStr; }
+    void setSelected(bool s) {
+        if (sel != s) { sel = s; update(); }
+    }
+    std::function<void()> onClick;
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF r = rect().adjusted(2, 2, -2, -2);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(hexStr));
+        p.drawRoundedRect(r, theme::kRadiusSm, theme::kRadiusSm);
+        if (sel) {
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(theme::kAccent), 2));
+            p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), theme::kRadiusSm, theme::kRadiusSm);
+        } else {
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(233, 233, 237, 30), 1));
+            p.drawRoundedRect(r, theme::kRadiusSm, theme::kRadiusSm);
+        }
+    }
+    void mouseReleaseEvent(QMouseEvent *) override {
+        if (onClick) onClick();
+    }
+
+private:
+    QString hexStr;
+    bool sel = false;
+};
+
+} // namespace
+
+// Defined at global scope so it matches the header's forward declaration.
+// The persistent live overlay preview at the bottom of the content pane: a
+// simplified mini-OSD that re-renders from the pending OverlaySettings.
+class OverlayPreview : public QWidget {
+public:
+    explicit OverlayPreview(QWidget *parent = nullptr) : QWidget(parent) {
+        setFixedHeight(114);
+        setMinimumWidth(280);
+    }
+    void setSettings(const OverlaySettings &s) { settings = s; update(); }
+
+protected:
+    // A true miniature of the OSD (option 3a): full-bleed art dissolving into
+    // the ground, title/artist, the progress rail, the SPOTIFY VOLUME row, and
+    // the lit bottom edge — all in the pending colours, so it can't drift from
+    // the real overlay.
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        const QRectF r = rect();
+
+        // Well.
+        QLinearGradient well(r.topLeft(), r.bottomRight());
+        well.setColorAt(0.0, QColor(theme::kNeutral900));
+        well.setColorAt(1.0, QColor(settings.backgroundColor));
+        QPainterPath wp;
+        wp.addRoundedRect(r, theme::kRadiusMd, theme::kRadiusMd);
+        p.fillPath(wp, well);
+
+        // The OSD card, inset in the well.
+        const QRectF card = r.adjusted(9, 9, -9, -9);
+        const qreal radius = theme::kRadiusLg * (card.height() / 148.0);
+        QPainterPath cp;
+        cp.addRoundedRect(card, radius, radius);
+        p.save();
+        p.setClipPath(cp);
+        p.fillRect(card, QColor(settings.backgroundColor));
+
+        // Full-bleed album art (square, flush to the card edges) with a fallback
+        // glyph, dissolving into the ground on its right.
+        const qreal artW = card.height();
+        const QRectF art(card.left(), card.top(), artW, card.height());
+        p.fillRect(art, QColor(settings.borderColor));
+        p.setFont(theme::uiFont(int(artW * 0.28)));
+        p.setPen(QColor(theme::kAccent700));
+        p.drawText(art, Qt::AlignCenter, QStringLiteral("♪"));
+        QLinearGradient dissolve(art.left(), 0, art.right(), 0);
+        QColor clear = QColor(settings.backgroundColor);
+        clear.setAlpha(0);
+        dissolve.setColorAt(0.0, clear);
+        dissolve.setColorAt(0.45, clear);
+        dissolve.setColorAt(1.0, QColor(settings.backgroundColor));
+        p.fillRect(art, dissolve);
+
+        // Text column.
+        const qreal tx = art.right() + 11;
+        const qreal rightPad = 12;
+        const qreal tw = card.right() - rightPad - tx;
+        const qreal top = card.top();
+
+        p.setPen(QColor(settings.primaryTextColor));
+        p.setFont(theme::uiFont(15, QFont::Medium));
+        p.drawText(QRectF(tx, top + 12, tw, 20), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Lemonade (feat. NAV)"));
+        p.setPen(QColor(settings.secondaryTextColor));
+        p.setFont(theme::uiFont(11));
+        p.drawText(QRectF(tx, top + 33, tw, 16), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Internet Money, Gunna"));
+
+        // Progress rail + time.
+        const qreal py = top + 56;
+        const qreal timeW = 58;
+        const qreal railW = qMax<qreal>(20, tw - timeW - 8);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(settings.borderColor));
+        p.drawRoundedRect(QRectF(tx, py, railW, 2), 1, 1);
+        p.setBrush(QColor(settings.progressBarColor));
+        p.drawRoundedRect(QRectF(tx, py, railW * 0.62, 2), 1, 1);
+        p.setPen(QColor(theme::kNeutral600));
+        p.setFont(theme::uiFont(10, QFont::Normal, true));
+        p.drawText(QRectF(tx + railW + 8, py - 7, timeW, 16), Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("1:58 / 2:44"));
+
+        // SPOTIFY VOLUME caption + number + %.
+        const qreal vy = top + 68;
+        const qreal pctX = card.right() - rightPad - 8;
+        const qreal numX = pctX - 26;
+        QFont cap = theme::uiFont(9);
+        cap.setCapitalization(QFont::AllUppercase);
+        cap.setLetterSpacing(QFont::AbsoluteSpacing, 1.0);
+        p.setFont(cap);
+        p.setPen(QColor(theme::kNeutral600));
+        p.drawText(QRectF(tx, vy, numX - tx - 6, 16), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Spotify volume"));
+        p.setPen(QColor(theme::kAccent300));
+        p.setFont(theme::uiFont(13, QFont::Medium, true));
+        p.drawText(QRectF(numX, vy, 24, 16), Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("70"));
+        p.setPen(QColor(theme::kAccent400));
+        p.setFont(theme::uiFont(9));
+        p.drawText(QRectF(pctX, vy, 8, 16), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("%"));
+
+        // Lit bottom edge = the volume, with the soft accent halo.
+        const qreal ey = card.bottom() - 3;
+        QColor trackC(233, 233, 237);
+        trackC.setAlpha(20);
+        p.fillRect(QRectF(card.left(), ey, card.width(), 3), trackC);
+        const qreal fillW = card.width() * 0.70;
+        p.setPen(Qt::NoPen);
+        for (int i = 9; i >= 1; --i) {
+            const qreal t = qreal(i) / 9;
+            const qreal grow = 13 * t;
+            QColor c(settings.accentColor);
+            c.setAlpha(int(50.0 * (1.0 - t) * (1.0 - t) + 7));
+            QPainterPath hp;
+            hp.addRoundedRect(QRectF(card.left() - grow, ey - grow, fillW + 2 * grow, 3 + 2 * grow), grow + 1.5, grow + 1.5);
+            p.fillPath(hp, c);
+        }
+        p.fillRect(QRectF(card.left(), ey, fillW, 3), QColor(settings.accentColor));
+        p.restore();
+
+        // shadow-md hairline edge.
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(QColor(theme::kNeutral700), 1));
+        p.drawPath(cp);
+    }
+
+private:
+    OverlaySettings settings;
+};
+
+namespace {
+// Colour roles shown in the "Customise" disclosure, each with a curated ramp.
+struct RoleSpec {
+    const char *label;
+    const char *field;
+    QStringList ramp;
+    bool textRole;
+};
+} // namespace
+
+// Bridge so the header's incomplete ColorRole type isn't needed.
+struct ColorRole {};
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle("Overtune Settings");
     setModal(false);
-    resize(520, 470);
-    setStyleSheet(kSettingsStyle);
+    setFixedWidth(760);
+    setMinimumHeight(600);
+    setStyleSheet(QString(
+        "QDialog { background: %1; }"
+        "QLabel { color: %2; background: transparent; }"
+        "QScrollArea { background: transparent; border: none; }"
+        "QScrollBar:vertical { background: transparent; width: 9px; margin: 0; }"
+        "QScrollBar::handle:vertical { background: %3; border-radius: 4px; min-height: 24px; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+        "QCheckBox { spacing: 8px; color: %4; background: transparent; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid %5; background: %6; }"
+        "QCheckBox::indicator:checked { background: %7; border-color: %7; }"
+        "QSlider::groove:horizontal { height: 3px; background: %8; border-radius: 2px; }"
+        "QSlider::sub-page:horizontal { height: 3px; background: %7; border-radius: 2px; }"
+        "QSlider::handle:horizontal { width: 11px; height: 11px; margin: -4px 0; border-radius: 6px; background: %7; }")
+        .arg(theme::kBg, theme::kText, theme::kNeutral800, theme::kNeutral300,
+             theme::kNeutral700, theme::kSurface, theme::kAccent, theme::kNeutral800));
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 18, 18, 18);
-    layout->setSpacing(12);
+    QHBoxLayout *root = new QHBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
 
-    // Section-heading font. The window title bar already names the dialog, so
-    // there is no redundant in-window "Overtune Settings" heading.
-    QFont titleFont = font();
-    titleFont.setPointSize(titleFont.pointSize() + 2);
-    titleFont.setBold(true);
+    root->addWidget(buildSidebar());
 
-    tabs = new QTabWidget(this);
+    QWidget *content = new QWidget(this);
+    QVBoxLayout *contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(theme::kSpace6, theme::kSpace6, theme::kSpace8, theme::kSpace6);
+    contentLayout->setSpacing(theme::kSpace4);
 
-    QWidget *spotifyTab = new QWidget(this);
-    QVBoxLayout *spotifyLayout = new QVBoxLayout(spotifyTab);
-    spotifyLayout->setContentsMargins(14, 14, 14, 14);
-    spotifyLayout->setSpacing(10);
+    stack = new QStackedWidget(content);
+    stack->setStyleSheet("background: transparent;");
+    stack->addWidget(buildConnectionPage());
+    stack->addWidget(buildOverlayPage());
+    stack->addWidget(buildUpNextPage());
+    stack->addWidget(buildKeybindsPage());
+    contentLayout->addWidget(stack, 1);
 
-    QLabel *spotifyTitle = new QLabel("Spotify Connection", spotifyTab);
-    spotifyTitle->setFont(titleFont);
-    spotifyTitle->setStyleSheet("color: #f0f0f0; background: transparent;");
-    spotifyLayout->addWidget(spotifyTitle);
+    // Persistent live overlay preview.
+    QLabel *previewLabel = new QLabel(QStringLiteral("LIVE OVERLAY"), content);
+    QFont plf = theme::uiFont(10);
+    plf.setLetterSpacing(QFont::AbsoluteSpacing, 1.4);
+    previewLabel->setFont(plf);
+    previewLabel->setStyleSheet(QString("color: %1; background: transparent;").arg(theme::kNeutral600));
+    contentLayout->addWidget(previewLabel);
+    preview = new OverlayPreview(content);
+    contentLayout->addWidget(preview);
 
-    connectionValueLabel = new QLabel(this);
-    helpTextLabel = new QLabel(this);
-    helpTextLabel->setWordWrap(true);
+    // Footer actions.
+    QHBoxLayout *footer = new QHBoxLayout();
+    footer->addStretch(1);
+    QPushButton *resetButton = new QPushButton(QStringLiteral("Reset"), content);
+    resetButton->setStyleSheet(secondaryQss());
+    resetButton->setCursor(Qt::PointingHandCursor);
+    connect(resetButton, &QPushButton::clicked, this, [this]() {
+        setOverlaySettings(OverlaySettings{});
+        emit overlaySettingsChanged();
+    });
+    QPushButton *doneButton = new QPushButton(QStringLiteral("Done"), content);
+    doneButton->setStyleSheet(outlinedPrimaryQss());
+    doneButton->setCursor(Qt::PointingHandCursor);
+    connect(doneButton, &QPushButton::clicked, this, &QDialog::hide);
+    footer->addWidget(resetButton);
+    footer->addWidget(doneButton);
+    contentLayout->addLayout(footer);
 
-    spotifyLayout->addWidget(createRow("Status", connectionValueLabel, spotifyTab));
-    spotifyLayout->addWidget(helpTextLabel);
-    spotifyLayout->addSpacing(2);
-
-    connectButton = new QPushButton(this);
-    // Primary call to action: accent-filled to stand out from other buttons.
-    connectButton->setStyleSheet(
-        "QPushButton { background: #1DB954; border: none; border-radius: 6px;"
-        " padding: 7px 18px; color: #06130b; font-weight: bold; }"
-        "QPushButton:hover { background: #1ed760; }"
-        "QPushButton:pressed { background: #17a349; }");
-    connect(connectButton, &QPushButton::clicked, this, &SettingsDialog::connectSpotifyRequested);
-    spotifyLayout->addWidget(connectButton, 0, Qt::AlignLeft);
-
-    logViewer = new QPlainTextEdit(spotifyTab);
-    logViewer->setReadOnly(true);
-    logViewer->setMinimumHeight(120);
-    logViewer->setStyleSheet("QPlainTextEdit { background-color: #101010; color: #b9b9b9; font-family: monospace; font-size: 10px; border: 1px solid #303030; border-radius: 6px; padding: 6px; }");
-    spotifyLayout->addWidget(new QLabel("Connection log:", spotifyTab));
-    // Let the log fill the remaining space so the tab reads as full, not empty.
-    spotifyLayout->addWidget(logViewer, 1);
-    tabs->addTab(spotifyTab, "Spotify");
-
-    QWidget *overlayTab = new QWidget(this);
-    QFormLayout *overlayLayout = new QFormLayout(overlayTab);
-    overlayLayout->setContentsMargins(12, 12, 12, 12);
-    overlayLayout->setSpacing(10);
-
-    backgroundColorEdit = new QLineEdit(this);
-    backgroundColorPreview = createColorPreview(this);
-    borderColorEdit = new QLineEdit(this);
-    borderColorPreview = createColorPreview(this);
-    accentColorEdit = new QLineEdit(this);
-    accentColorPreview = createColorPreview(this);
-    primaryTextColorEdit = new QLineEdit(this);
-    primaryTextColorPreview = createColorPreview(this);
-    secondaryTextColorEdit = new QLineEdit(this);
-    secondaryTextColorPreview = createColorPreview(this);
-    mutedTextColorEdit = new QLineEdit(this);
-    mutedTextColorPreview = createColorPreview(this);
-    progressBarColorEdit = new QLineEdit(this);
-    progressBarColorPreview = createColorPreview(this);
-    overlayWidthSpin = new QSpinBox(this);
-    overlayWidthSpin->setRange(320, 900);
-    hideDurationSpin = new QSpinBox(this);
-    hideDurationSpin->setRange(1000, 15000);
-    hideDurationSpin->setSuffix(" ms");
-
-    overlayLayout->addRow("Background", createColorFieldRow(backgroundColorEdit, backgroundColorPreview, overlayTab));
-    overlayLayout->addRow("Border", createColorFieldRow(borderColorEdit, borderColorPreview, overlayTab));
-    overlayLayout->addRow("Accent", createColorFieldRow(accentColorEdit, accentColorPreview, overlayTab));
-    overlayLayout->addRow("Primary text", createColorFieldRow(primaryTextColorEdit, primaryTextColorPreview, overlayTab));
-    overlayLayout->addRow("Secondary text", createColorFieldRow(secondaryTextColorEdit, secondaryTextColorPreview, overlayTab));
-    overlayLayout->addRow("Muted text", createColorFieldRow(mutedTextColorEdit, mutedTextColorPreview, overlayTab));
-    overlayLayout->addRow("Progress bar", createColorFieldRow(progressBarColorEdit, progressBarColorPreview, overlayTab));
-    overlayLayout->addRow("Overlay width", overlayWidthSpin);
-    overlayLayout->addRow("Hide delay", hideDurationSpin);
-    tabs->addTab(overlayTab, "Overlay");
-
-    QWidget *queueTab = new QWidget(this);
-    QFormLayout *queueLayout = new QFormLayout(queueTab);
-    queueLayout->setContentsMargins(12, 12, 12, 12);
-    queueLayout->setSpacing(10);
-
-    queueEnabledCheck = new QCheckBox("Show the Up Next window", this);
-    queueShowNowPlayingCheck = new QCheckBox("Show the current song at the top", this);
-    queueLockedCheck = new QCheckBox("Lock the window (click-through)", this);
-    queueShowLockIconCheck = new QCheckBox("Show a lock icon while locked", this);
-    queueMaxSongsSpin = new QSpinBox(this);
-    queueMaxSongsSpin->setRange(1, 30);
-    queueMaxSongsSpin->setSuffix(" songs");
-    queueOpacitySpin = new QSpinBox(this);
-    queueOpacitySpin->setRange(20, 100);
-    queueOpacitySpin->setSuffix("%");
-    queueHoverColorEdit = new QLineEdit(this);
-    queueHoverColorPreview = createColorPreview(this);
-    QLabel *queueHint = new QLabel("The Up Next window stays on top and never auto-hides. Drag it anywhere with the mouse, resize it from the left/right edge — position and size are remembered. Locking makes it click-through so it can't be moved or block clicks. Global shortcuts (configurable in Keybinds): Alt+L toggles the lock, Alt+U shows/hides the window.", this);
-    queueHint->setWordWrap(true);
-
-    queueLayout->addRow(QString(), queueEnabledCheck);
-    queueLayout->addRow(QString(), queueShowNowPlayingCheck);
-    queueLayout->addRow(QString(), queueLockedCheck);
-    queueLayout->addRow(QString(), queueShowLockIconCheck);
-    queueLayout->addRow("Songs shown", queueMaxSongsSpin);
-    queueLayout->addRow("Opacity", queueOpacitySpin);
-    queueLayout->addRow("Hover color", createColorFieldRow(queueHoverColorEdit, queueHoverColorPreview, queueTab));
-    queueLayout->addRow(QString(), queueHint);
-    tabs->addTab(queueTab, "Up Next");
-
-    QWidget *keybindsTab = new QWidget(this);
-    QFormLayout *keybindsLayout = new QFormLayout(keybindsTab);
-    keybindsLayout->setContentsMargins(12, 12, 12, 12);
-    keybindsLayout->setSpacing(10);
-
-    coarseStepSpin = new QSpinBox(this);
-    coarseStepSpin->setRange(1, 25);
-    fineStepSpin = new QSpinBox(this);
-    fineStepSpin->setRange(1, 25);
-    mainKeyButton = new KeyCaptureButton(this);
-    likeKeyButton = new KeyCaptureButton(this);
-    lockKeyButton = new KeyCaptureButton(this);
-    showKeyButton = new KeyCaptureButton(this);
-    useShiftFineAdjustCheck = new QCheckBox("Use Shift for fine adjustment", this);
-    QLabel *mainKeyHint = new QLabel("Click a key field, then press the key you want (or right-click to type a code by hand). The main key toggles volume control; hold Shift with it to Skip, or Ctrl for Previous. (Caps Lock is the default and works on macOS too.)", this);
-    mainKeyHint->setWordWrap(true);
-
-    keybindsLayout->addRow("Coarse step", coarseStepSpin);
-    keybindsLayout->addRow("Fine step", fineStepSpin);
-    keybindsLayout->addRow("Main key", mainKeyButton);
-    keybindsLayout->addRow("Like key (with Alt)", likeKeyButton);
-    keybindsLayout->addRow("Lock window key (with Alt)", lockKeyButton);
-    keybindsLayout->addRow("Show/hide window key (with Alt)", showKeyButton);
-    keybindsLayout->addRow(QString(), useShiftFineAdjustCheck);
-    keybindsLayout->addRow(QString(), mainKeyHint);
-    QLabel *comboKeyHint = new QLabel("Hold Alt with these keys: the like key saves the current song (default S); the lock key toggles the Up Next window's click-through lock (default L); the show/hide key toggles the window (default U).", this);
-    comboKeyHint->setWordWrap(true);
-    keybindsLayout->addRow(QString(), comboKeyHint);
-
-#ifdef _WIN32
-    runAsAdminCheck = new QCheckBox("Run as administrator", this);
-    runAsAdminCheck->setChecked(AppSettings::loadRunAsAdmin());
-    connect(runAsAdminCheck, &QCheckBox::toggled, this, [](bool on) { AppSettings::saveRunAsAdmin(on); });
-    keybindsLayout->addRow(QString(), runAsAdminCheck);
-    QLabel *adminHint = new QLabel("Off by default — the app needs no admin rights. Enable this only if you want the hotkeys to work while a program running as administrator has focus (some games/anti-cheat). Takes effect on the next launch.", this);
-    adminHint->setWordWrap(true);
-    keybindsLayout->addRow(QString(), adminHint);
-#endif
-
-    tabs->addTab(keybindsTab, "Keybinds");
-
-    layout->addWidget(tabs);
+    root->addWidget(content, 1);
 
     wireOverlayControls();
     wireKeybindControls();
     wireQueueControls();
 
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::hide);
-    layout->addWidget(buttonBox);
-
+    selectSection(0);
     refreshUi();
+}
+
+QWidget *SettingsDialog::buildSidebar() {
+    QWidget *sidebar = new QWidget(this);
+    sidebar->setFixedWidth(196);
+    sidebar->setStyleSheet(QString("background: %1;").arg(theme::kSurface));
+    QVBoxLayout *layout = new QVBoxLayout(sidebar);
+    layout->setContentsMargins(theme::kSpace4, theme::kSpace6, theme::kSpace4, theme::kSpace6);
+    layout->setSpacing(theme::kSpace1);
+
+    // Wordmark.
+    QWidget *brand = new QWidget(sidebar);
+    QHBoxLayout *brandLayout = new QHBoxLayout(brand);
+    brandLayout->setContentsMargins(theme::kSpace2, 0, theme::kSpace2, theme::kSpace6);
+    brandLayout->setSpacing(theme::kSpace2);
+    QLabel *mark = new QLabel(brand);
+    mark->setFixedSize(16, 16);
+    mark->setStyleSheet(QString("background: %1; border-radius: 5px;").arg(theme::kAccent));
+    QLabel *word = new QLabel(QStringLiteral("Overtune"), brand);
+    word->setFont(theme::uiFont(15, QFont::Medium));
+    word->setStyleSheet(QString("color: %1;").arg(theme::kText));
+    brandLayout->addWidget(mark);
+    brandLayout->addWidget(word);
+    brandLayout->addStretch(1);
+    layout->addWidget(brand);
+
+    const QStringList sections = {"Connection", "Overlay", "Up Next", "Keybinds"};
+    for (int i = 0; i < sections.size(); ++i) {
+        QPushButton *nav = new QPushButton(sections.at(i), sidebar);
+        nav->setCheckable(true);
+        nav->setCursor(Qt::PointingHandCursor);
+        nav->setFont(theme::uiFont(13));
+        nav->setStyleSheet(QString(
+            "QPushButton { text-align: left; padding: 8px %1px; border-radius: %2px;"
+            " border: none; color: %3; background: transparent; }"
+            "QPushButton:hover { background: rgba(233,233,237,0.07); }"
+            "QPushButton:checked { color: %4; background: rgba(145,132,217,0.14);"
+            " border-left: 2px solid %4; padding-left: %5px; }")
+            .arg(theme::kSpace3).arg(theme::kRadiusMd).arg(theme::kNeutral400)
+            .arg(theme::kAccent).arg(theme::kSpace3 - 2));
+        connect(nav, &QPushButton::clicked, this, [this, i]() { selectSection(i); });
+        navButtons.append(nav);
+        layout->addWidget(nav);
+    }
+
+    layout->addStretch(1);
+
+    // Connection indicator.
+    QWidget *status = new QWidget(sidebar);
+    QHBoxLayout *statusLayout = new QHBoxLayout(status);
+    statusLayout->setContentsMargins(theme::kSpace3, theme::kSpace3, theme::kSpace3, 0);
+    statusLayout->setSpacing(theme::kSpace2);
+    sidebarDot = new QLabel(status);
+    sidebarDot->setFixedSize(8, 8);
+    sidebarStatus = new QLabel(QStringLiteral("Not connected"), status);
+    sidebarStatus->setFont(theme::uiFont(11));
+    sidebarStatus->setStyleSheet(QString("color: %1;").arg(theme::kNeutral500));
+    statusLayout->addWidget(sidebarDot);
+    statusLayout->addWidget(sidebarStatus);
+    statusLayout->addStretch(1);
+    layout->addWidget(status);
+
+    return sidebar;
+}
+
+static QScrollArea *wrapScroll(QWidget *page) {
+    QScrollArea *area = new QScrollArea();
+    area->setWidgetResizable(true);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    area->setFrameShape(QFrame::NoFrame);
+    area->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    area->setWidget(page);
+    // The viewport otherwise paints QPalette::Base (a #1e1e1e in Windows dark
+    // mode) instead of letting the dialog's Nocturne ground show through.
+    area->viewport()->setStyleSheet("background: transparent;");
+    area->viewport()->setAutoFillBackground(false);
+    return area;
+}
+
+QWidget *SettingsDialog::buildConnectionPage() {
+    QWidget *page = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(theme::kSpace4);
+
+    layout->addWidget(heading("Connection", page));
+    layout->addWidget(subline("Authorize Overtune to read and control your Spotify playback. No password or cookie is ever handled by the app.", page));
+
+    QWidget *statusRow = new QWidget(page);
+    QHBoxLayout *statusLayout = new QHBoxLayout(statusRow);
+    statusLayout->setContentsMargins(0, 0, 0, 0);
+    statusLayout->setSpacing(theme::kSpace3);
+    QLabel *statusLabel = new QLabel(QStringLiteral("Status"), statusRow);
+    statusLabel->setStyleSheet(QString("color: %1;").arg(theme::kNeutral300));
+    connectionValueLabel = new QLabel(statusRow);
+    connectionValueLabel->setStyleSheet(QString("color: %1;").arg(theme::kText));
+    statusLayout->addWidget(statusLabel);
+    statusLayout->addWidget(connectionValueLabel);
+    statusLayout->addStretch(1);
+    layout->addWidget(statusRow);
+
+    helpTextLabel = new QLabel(page);
+    helpTextLabel->setWordWrap(true);
+    helpTextLabel->setOpenExternalLinks(true);
+    helpTextLabel->setStyleSheet(QString("color: %1;").arg(theme::kNeutral400));
+    layout->addWidget(helpTextLabel);
+
+    connectButton = new QPushButton(page);
+    connectButton->setCursor(Qt::PointingHandCursor);
+    connectButton->setStyleSheet(outlinedPrimaryQss());
+    connect(connectButton, &QPushButton::clicked, this, &SettingsDialog::connectSpotifyRequested);
+    layout->addWidget(connectButton, 0, Qt::AlignLeft);
+
+    QLabel *logLabel = new QLabel(QStringLiteral("Connection log"), page);
+    logLabel->setStyleSheet(QString("color: %1;").arg(theme::kNeutral500));
+    layout->addWidget(logLabel);
+    logViewer = new QPlainTextEdit(page);
+    logViewer->setReadOnly(true);
+    logViewer->setMinimumHeight(120);
+    logViewer->setStyleSheet(QString(
+        "QPlainTextEdit { background: %1; color: %2; font-family: 'Consolas','Menlo',monospace;"
+        " font-size: 10px; border: 1px solid %3; border-radius: %4px; padding: 6px; }")
+        .arg(theme::kBg, theme::kNeutral500, theme::kDivider).arg(theme::kRadiusMd));
+    layout->addWidget(logViewer, 1);
+
+    return wrapScroll(page);
+}
+
+QWidget *SettingsDialog::buildOverlayPage() {
+    QWidget *page = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(theme::kSpace3);
+
+    layout->addWidget(heading("Appearance", page));
+    layout->addWidget(subline("Pick a theme for both overlays.", page));
+
+    // Preset grid.
+    struct PresetVisual { const char *ground; const char *art; const char *text; const char *secondary; const char *accent; };
+    const QList<PresetVisual> visuals = {
+        {"#161826", "#3f424d", "#e9e9ed", "#75798c", "#9184d9"},
+        {"#0d0f16", "#292b31", "#cfd3e5", "#595d6c", "#b2b6ca"},
+        {"#232532", "#423a6a", "#f3f5fe", "#9397ab", "#b5abfc"},
+        {"#262a60", "#4c5397", "#f5f4ff", "#a7a1db", "#e7e5fe"},
+    };
+    QGridLayout *grid = new QGridLayout();
+    grid->setSpacing(theme::kSpace3);
+    const QList<theme::Preset> &presets = theme::presets();
+    for (int i = 0; i < presets.size(); ++i) {
+        // The whole card is a flat button; its children are mouse-transparent so
+        // a click anywhere on it applies the preset.
+        QPushButton *card = new QPushButton(page);
+        card->setCursor(Qt::PointingHandCursor);
+        // A QPushButton's sizeHint is text-based and ignores a child layout, so
+        // reserve the height its mini + name need explicitly.
+        card->setMinimumHeight(86);
+        QVBoxLayout *cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(theme::kSpace3, theme::kSpace3, theme::kSpace3, theme::kSpace3);
+        cardLayout->setSpacing(theme::kSpace2);
+        const PresetVisual &v = visuals.at(i);
+        PresetMini *mini = new PresetMini(v.ground, v.art, v.text, v.secondary, v.accent, card);
+        mini->setAttribute(Qt::WA_TransparentForMouseEvents);
+        cardLayout->addWidget(mini);
+        QWidget *nameRow = new QWidget(card);
+        nameRow->setAttribute(Qt::WA_TransparentForMouseEvents);
+        QHBoxLayout *nameLayout = new QHBoxLayout(nameRow);
+        nameLayout->setContentsMargins(0, 0, 0, 0);
+        nameLayout->setSpacing(theme::kSpace2);
+        QLabel *name = new QLabel(presets.at(i).name, nameRow);
+        name->setFont(theme::uiFont(12, QFont::Medium));
+        name->setStyleSheet(QString("color: %1;").arg(theme::kText));
+        QLabel *tag = new QLabel(QStringLiteral("Current"), nameRow);
+        tag->setFont(theme::uiFont(9));
+        tag->setStyleSheet(QString("color: %1; background: %2; border-radius: 4px; padding: 1px 6px;")
+            .arg(theme::kAccent200, theme::kAccent800));
+        tag->hide();
+        nameLayout->addWidget(name);
+        nameLayout->addWidget(tag);
+        nameLayout->addStretch(1);
+        cardLayout->addWidget(nameRow);
+
+        card->setStyleSheet(QString(
+            "QPushButton { background: %1; border-radius: %2px; border: 1px solid %3; text-align: left; }")
+            .arg(theme::kSurface).arg(theme::kRadiusMd).arg(theme::kDivider));
+        connect(card, &QPushButton::clicked, this, [this, i]() { applyPreset(i); });
+
+        presetCards.append(card);
+        presetTags.append(tag);
+        grid->addWidget(card, i / 2, i % 2);
+    }
+    layout->addLayout(grid);
+
+    // Disclosure.
+    disclosureButton = new QPushButton(page);
+    disclosureButton->setCursor(Qt::PointingHandCursor);
+    disclosureButton->setFont(theme::uiFont(12));
+    disclosureButton->setStyleSheet(QString(
+        "QPushButton { text-align: left; color: %1; background: transparent; border: none; padding: %2px 0; }")
+        .arg(theme::kAccent).arg(theme::kSpace3));
+    connect(disclosureButton, &QPushButton::clicked, this, [this]() { setDisclosureExpanded(!disclosureExpanded); });
+    layout->addWidget(disclosureButton);
+
+    // Customise box (hidden until expanded).
+    customiseBox = new QWidget(page);
+    QVBoxLayout *cust = new QVBoxLayout(customiseBox);
+    cust->setContentsMargins(0, 0, 0, 0);
+    cust->setSpacing(theme::kSpace3);
+
+    backgroundColorEdit = new QLineEdit(customiseBox);
+    surfaceColorEdit = new QLineEdit(customiseBox);
+    borderColorEdit = new QLineEdit(customiseBox);
+    accentColorEdit = new QLineEdit(customiseBox);
+    primaryTextColorEdit = new QLineEdit(customiseBox);
+    secondaryTextColorEdit = new QLineEdit(customiseBox);
+    mutedTextColorEdit = new QLineEdit(customiseBox);
+    progressBarColorEdit = new QLineEdit(customiseBox);
+
+    const QList<RoleSpec> roles = {
+        {"Ground",         "background", {"#161826", "#232532", "#292b31", "#3f424d"}, false},
+        {"Surface",        "surface",    {"#232532", "#2b2741", "#292b31", "#3f424d"}, false},
+        {"Accent",         "accent",     {"#9184d9", "#a7a1db", "#b5abfc", "#e7e5fe"}, false},
+        {"Text",           "primary",    {"#e9e9ed", "#cfd3e5", "#b2b6ca", "#9397ab"}, true},
+        {"Secondary text", "secondary",  {"#9397ab", "#b2b6ca", "#75798c", "#cfd3e5"}, true},
+        {"Muted text",     "muted",      {"#75798c", "#595d6c", "#9397ab", "#3f424d"}, true},
+        {"Rail / trough",  "border",     {"#3f424d", "#595d6c", "#292b31", "#232532"}, false},
+        {"Progress",       "progress",   {"#cfd3e5", "#b2b6ca", "#9184d9", "#e9e9ed"}, false},
+    };
+    for (const RoleSpec &role : roles) {
+        cust->addWidget(makeColorRow(role.label, colorEditFor(role.field), role.ramp, role.textRole));
+    }
+
+    // Sliders.
+    auto makeSlider = [&](const QString &label, int lo, int hi, QSlider *&slider, QLabel *&value) {
+        QWidget *row = new QWidget(customiseBox);
+        QHBoxLayout *rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(theme::kSpace3);
+        QLabel *l = new QLabel(label, row);
+        l->setFixedWidth(104);
+        l->setStyleSheet(QString("color: %1; font-size: 12px;").arg(theme::kNeutral400));
+        slider = new QSlider(Qt::Horizontal, row);
+        slider->setRange(lo, hi);
+        value = new QLabel(row);
+        value->setFixedWidth(64);
+        value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        value->setFont(theme::uiFont(12, QFont::Normal, true));
+        value->setStyleSheet(QString("color: %1;").arg(theme::kNeutral400));
+        rl->addWidget(l);
+        rl->addWidget(slider, 1);
+        rl->addWidget(value);
+        return row;
+    };
+    cust->addSpacing(theme::kSpace2);
+    cust->addWidget(makeSlider("Overlay width", 320, 900, overlayWidthSlider, overlayWidthValue));
+    cust->addWidget(makeSlider("Hide delay", 1000, 15000, hideDurationSlider, hideDurationValue));
+
+    layout->addWidget(customiseBox);
+    layout->addStretch(1);
+
+    setDisclosureExpanded(false); // sets the "▸ Customise…" label and hides the box
+
+    return wrapScroll(page);
+}
+
+QWidget *SettingsDialog::buildUpNextPage() {
+    QWidget *page = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(theme::kSpace4);
+
+    layout->addWidget(heading("Up Next", page));
+    layout->addWidget(subline("How the always-on-top queue window behaves. Toggle it and its lock from the tray menu, or with Alt+U / Alt+L.", page));
+
+    auto sentence = [&](const QString &pre, QWidget *chip, const QString &post) {
+        QWidget *row = new QWidget(page);
+        QHBoxLayout *rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(theme::kSpace3);
+        QLabel *a = new QLabel(pre, row);
+        a->setStyleSheet(QString("color: %1; font-size: 13px;").arg(theme::kNeutral300));
+        rl->addWidget(a);
+        rl->addWidget(chip);
+        QLabel *b = new QLabel(post, row);
+        b->setStyleSheet(QString("color: %1; font-size: 13px;").arg(theme::kNeutral300));
+        rl->addWidget(b);
+        rl->addStretch(1);
+        return row;
+    };
+
+    queueMaxSongsSpin = new QSpinBox(page);
+    queueMaxSongsSpin->setRange(1, 30);
+    queueMaxSongsSpin->setStyleSheet(chipSpinQss());
+    queueMaxSongsSpin->setFixedWidth(52);
+    layout->addWidget(sentence("Show", queueMaxSongsSpin, "upcoming songs, with the current one at the top."));
+
+    queueOpacitySpin = new QSpinBox(page);
+    queueOpacitySpin->setRange(20, 100);
+    queueOpacitySpin->setSuffix("%");
+    queueOpacitySpin->setStyleSheet(chipSpinQss());
+    queueOpacitySpin->setFixedWidth(64);
+    layout->addWidget(sentence("Window opacity", queueOpacitySpin, "— click-through when locked."));
+
+    queueShowNowPlayingCheck = new QCheckBox("Show the current song above the queue", page);
+    queueShowLockIconCheck = new QCheckBox("Show a “Locked” chip while the window is locked", page);
+    layout->addWidget(queueShowNowPlayingCheck);
+    layout->addWidget(queueShowLockIconCheck);
+
+    QCheckBox *remember = new QCheckBox("Remember where I drag it", page);
+    remember->setChecked(true);
+    remember->setEnabled(false);
+    remember->setToolTip("The window's position and size are always remembered.");
+    layout->addWidget(remember);
+
+    layout->addStretch(1);
+    return wrapScroll(page);
+}
+
+QWidget *SettingsDialog::buildKeybindsPage() {
+    QWidget *page = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(theme::kSpace4);
+
+    layout->addWidget(heading("Keybinds", page));
+    layout->addWidget(subline("Click a field, then press the key. The main key toggles volume control; hold Shift with it to skip, Ctrl for previous.", page));
+
+    mainKeyButton = new KeyCaptureButton(page);
+    likeKeyButton = new KeyCaptureButton(page);
+    lockKeyButton = new KeyCaptureButton(page);
+    showKeyButton = new KeyCaptureButton(page);
+
+    auto altChip = [&](QWidget *parent) {
+        QLabel *l = new QLabel(QStringLiteral("Alt"), parent);
+        l->setFont(theme::uiFont(13));
+        l->setStyleSheet(QString(
+            "color: %1; background: %2; border: 1px solid %3; border-radius: %4px; padding: 6px 10px;")
+            .arg(theme::kNeutral400, theme::kSurface, theme::kDivider).arg(theme::kRadiusMd));
+        return l;
+    };
+    auto plus = [&](QWidget *parent) {
+        QLabel *l = new QLabel(QStringLiteral("+"), parent);
+        l->setStyleSheet(QString("color: %1;").arg(theme::kNeutral600));
+        return l;
+    };
+    auto labelCol = [&](const QString &text, QWidget *parent) {
+        QLabel *l = new QLabel(text, parent);
+        l->setFixedWidth(150);
+        l->setStyleSheet(QString("color: %1; font-size: 13px;").arg(theme::kNeutral300));
+        return l;
+    };
+
+    // Main key row.
+    {
+        QWidget *row = new QWidget(page);
+        QHBoxLayout *rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(theme::kSpace4);
+        rl->addWidget(labelCol("Main key", row));
+        rl->addWidget(mainKeyButton);
+        QLabel *hint = new QLabel(QStringLiteral("+ Shift skip · + Ctrl previous"), row);
+        hint->setStyleSheet(QString("color: %1; font-size: 11px;").arg(theme::kNeutral600));
+        rl->addWidget(hint);
+        rl->addStretch(1);
+        layout->addWidget(row);
+    }
+    auto comboRow = [&](const QString &label, KeyCaptureButton *btn) {
+        QWidget *row = new QWidget(page);
+        QHBoxLayout *rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(theme::kSpace2);
+        rl->addWidget(labelCol(label, row));
+        rl->addSpacing(theme::kSpace2);
+        rl->addWidget(altChip(row));
+        rl->addWidget(plus(row));
+        rl->addWidget(btn);
+        rl->addStretch(1);
+        layout->addWidget(row);
+    };
+    comboRow("Like the song", likeKeyButton);
+    comboRow("Lock Up Next", lockKeyButton);
+    comboRow("Show / hide Up Next", showKeyButton);
+
+    // Divider.
+    QLabel *rule = new QLabel(page);
+    rule->setFixedHeight(1);
+    rule->setStyleSheet(QString(
+        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 transparent,"
+        " stop:0.08 %1, stop:0.92 %1, stop:1 transparent);").arg(theme::kDivider));
+    layout->addWidget(rule);
+
+    // Volume step segmented control.
+    {
+        QWidget *row = new QWidget(page);
+        QHBoxLayout *rl = new QHBoxLayout(row);
+        rl->setContentsMargins(0, 0, 0, 0);
+        rl->setSpacing(theme::kSpace4);
+        rl->addWidget(labelCol("Volume step", row));
+
+        QWidget *seg = new QWidget(row);
+        seg->setStyleSheet(QString("background: transparent; border: 1px solid %1; border-radius: %2px;")
+            .arg(theme::kDivider).arg(theme::kRadiusMd));
+        QHBoxLayout *segLayout = new QHBoxLayout(seg);
+        segLayout->setContentsMargins(0, 0, 0, 0);
+        segLayout->setSpacing(0);
+        QButtonGroup *group = new QButtonGroup(this);
+        const QList<QPair<QString, int>> opts = {{"5% coarse", 5}, {"2%", 2}, {"10%", 10}};
+        for (int i = 0; i < opts.size(); ++i) {
+            QPushButton *opt = new QPushButton(opts.at(i).first, seg);
+            opt->setCheckable(true);
+            opt->setCursor(Qt::PointingHandCursor);
+            opt->setProperty("stepValue", opts.at(i).second);
+            opt->setStyleSheet(QString(
+                "QPushButton { border: none; %1 padding: 7px 12px; font-size: 12px; color: %2; background: transparent; }"
+                "QPushButton:checked { color: %3; }")
+                .arg(i == 0 ? QString() : QString("border-left: 1px solid %1;").arg(theme::kDivider))
+                .arg(theme::kNeutral400, theme::kAccent));
+            group->addButton(opt);
+            volumeStepButtons.append(opt);
+            segLayout->addWidget(opt);
+            connect(opt, &QPushButton::clicked, this, [this]() { emit keybindSettingsChanged(); });
+        }
+        rl->addWidget(seg);
+        QLabel *shiftHint = new QLabel(QStringLiteral("Shift → 1%"), row);
+        shiftHint->setStyleSheet(QString("color: %1; font-size: 11px;").arg(theme::kNeutral600));
+        rl->addWidget(shiftHint);
+        rl->addStretch(1);
+        layout->addWidget(row);
+    }
+
+#ifdef _WIN32
+    runAsAdminCheck = new QCheckBox("Run as administrator (next launch)", page);
+    runAsAdminCheck->setChecked(AppSettings::loadRunAsAdmin());
+    connect(runAsAdminCheck, &QCheckBox::toggled, this, [](bool on) { AppSettings::saveRunAsAdmin(on); });
+    layout->addWidget(runAsAdminCheck);
+    QLabel *adminHint = subline("Enable only if you want the hotkeys to work while a program running as administrator has focus (some games / anti-cheat).", page);
+    layout->addWidget(adminHint);
+#endif
+
+    layout->addStretch(1);
+    return wrapScroll(page);
+}
+
+void SettingsDialog::selectSection(int index) {
+    for (int i = 0; i < navButtons.size(); ++i) {
+        navButtons.at(i)->setChecked(i == index);
+    }
+    stack->setCurrentIndex(index);
+}
+
+QLineEdit *SettingsDialog::colorEditFor(const QString &role) const {
+    if (role == "background") return backgroundColorEdit;
+    if (role == "surface") return surfaceColorEdit;
+    if (role == "border") return borderColorEdit;
+    if (role == "accent") return accentColorEdit;
+    if (role == "primary") return primaryTextColorEdit;
+    if (role == "secondary") return secondaryTextColorEdit;
+    if (role == "muted") return mutedTextColorEdit;
+    if (role == "progress") return progressBarColorEdit;
+    return nullptr;
+}
+
+QWidget *SettingsDialog::makeColorRow(const QString &label, QLineEdit *edit, const QStringList &ramp, bool textRole) {
+    QWidget *row = new QWidget(customiseBox);
+    QHBoxLayout *rl = new QHBoxLayout(row);
+    rl->setContentsMargins(0, 0, 0, 0);
+    rl->setSpacing(theme::kSpace2);
+
+    QLabel *l = new QLabel(label, row);
+    l->setFixedWidth(104);
+    l->setStyleSheet(QString("color: %1; font-size: 12px;").arg(theme::kNeutral400));
+    rl->addWidget(l);
+
+    QList<QWidget *> group;
+    for (const QString &hex : ramp) {
+        Swatch *sw = new Swatch(hex, row);
+        sw->onClick = [this, edit, hex]() { edit->setText(hex); };
+        rl->addWidget(sw);
+        group.append(sw);
+    }
+    swatchGroups.append(group);
+    swatchRoleEdits.append(edit);
+
+    edit->setStyleSheet(hexInputQss());
+    edit->setFixedWidth(96);
+    rl->addWidget(edit);
+
+    if (textRole) {
+        QLabel *tag = new QLabel(row);
+        tag->setFont(theme::uiFont(10));
+        rl->addWidget(tag);
+        if (edit == primaryTextColorEdit) primaryContrastTag = tag;
+        else if (edit == secondaryTextColorEdit) secondaryContrastTag = tag;
+        else if (edit == mutedTextColorEdit) mutedContrastTag = tag;
+    }
+    rl->addStretch(1);
+    return row;
+}
+
+void SettingsDialog::setDisclosureExpanded(bool expanded) {
+    disclosureExpanded = expanded;
+    disclosureButton->setText((expanded ? QStringLiteral("▾  ") : QStringLiteral("▸  ")) +
+                              QStringLiteral("Customise colours, width and hide delay"));
+    customiseBox->setVisible(expanded);
+}
+
+void SettingsDialog::applyPreset(int index) {
+    const QList<theme::Preset> &presets = theme::presets();
+    if (index < 0 || index >= presets.size()) {
+        return;
+    }
+    const theme::Preset &p = presets.at(index);
+    presetName = p.name;
+    backgroundColorEdit->setText(p.background);
+    accentColorEdit->setText(p.accent);
+    refreshPresetSelection();
+    emit overlaySettingsChanged();
+}
+
+void SettingsDialog::refreshPresetSelection() {
+    const QList<theme::Preset> &presets = theme::presets();
+    const QString bg = backgroundColorEdit->text().trimmed();
+    const QString accent = accentColorEdit->text().trimmed();
+    int current = -1;
+    for (int i = 0; i < presets.size(); ++i) {
+        if (QString(presets.at(i).background).compare(bg, Qt::CaseInsensitive) == 0 &&
+            QString(presets.at(i).accent).compare(accent, Qt::CaseInsensitive) == 0) {
+            current = i;
+            break;
+        }
+    }
+    presetName = current >= 0 ? presets.at(current).name : QStringLiteral("Custom");
+    for (int i = 0; i < presetCards.size(); ++i) {
+        const bool sel = (i == current);
+        presetTags.at(i)->setVisible(sel);
+        presetCards.at(i)->setStyleSheet(QString("background: %1; border-radius: %2px; border: 1px solid %3;")
+            .arg(theme::kSurface).arg(theme::kRadiusMd)
+            .arg(sel ? QString(theme::kAccent) : QString(theme::kDivider)));
+    }
+}
+
+void SettingsDialog::updateColorUi() {
+    // Swatch selection rings.
+    for (int i = 0; i < swatchGroups.size(); ++i) {
+        const QString current = swatchRoleEdits.at(i)->text().trimmed();
+        for (QWidget *w : swatchGroups.at(i)) {
+            Swatch *sw = static_cast<Swatch *>(w);
+            sw->setSelected(sw->hex().compare(current, Qt::CaseInsensitive) == 0);
+        }
+    }
+
+    // Contrast tags for text roles.
+    const QColor bg(backgroundColorEdit->text().trimmed());
+    auto setTag = [&](QLabel *tag, QLineEdit *edit) {
+        if (!tag) return;
+        const QColor c(edit->text().trimmed());
+        if (!c.isValid() || !bg.isValid()) {
+            tag->setText(QString());
+            return;
+        }
+        const double ratio = contrastRatio(c, bg);
+        tag->setText(QString("contrast %1:1").arg(ratio, 0, 'f', 1));
+        const bool ok = ratio >= 4.5;
+        tag->setStyleSheet(QString("color: %1; background: %2; border-radius: 4px; padding: 1px 6px;")
+            .arg(ok ? QString(theme::kAccent200) : QString("#ffd7a8"),
+                 ok ? QString(theme::kAccent800) : QString("#5c3a12")));
+        tag->setToolTip(ok ? QStringLiteral("Readable on the ground.")
+                           : QStringLiteral("Low contrast — aim for 4.5:1 or higher."));
+    };
+    setTag(primaryContrastTag, primaryTextColorEdit);
+    setTag(secondaryContrastTag, secondaryTextColorEdit);
+    setTag(mutedContrastTag, mutedTextColorEdit);
+
+    if (preview) {
+        preview->setSettings(overlaySettings());
+    }
+    refreshPresetSelection();
 }
 
 void SettingsDialog::showAuthorizationPrompt(const QString &url, const QString &code) {
@@ -276,16 +970,13 @@ void SettingsDialog::showAuthorizationPrompt(const QString &url, const QString &
         helpTextLabel->setText(
             QString("<b>Authorize Overtune</b><br>"
                     "A browser window was opened. Approve access and you'll be connected automatically.<br>"
-                    "If it didn't open, <a href=\"%1\">click here</a>.")
-                .arg(url));
+                    "If it didn't open, <a href=\"%1\">click here</a>.").arg(url));
     } else {
         helpTextLabel->setText(
             QString("<b>Authorize Overtune</b><br>"
                     "A browser window was opened to <a href=\"%1\">%1</a>.<br>"
-                    "If it didn't open, visit that link and confirm the code <b>%2</b>.")
-                .arg(url, code));
+                    "If it didn't open, visit that link and confirm the code <b>%2</b>.").arg(url, code));
     }
-    helpTextLabel->setOpenExternalLinks(true);
 }
 
 void SettingsDialog::setAuthenticated(bool isAuthenticated) {
@@ -300,69 +991,83 @@ void SettingsDialog::appendLog(const QString &text) {
 }
 
 void SettingsDialog::setOverlaySettings(const OverlaySettings &settings) {
+    presetName = settings.presetName;
+    const QSignalBlocker b1(backgroundColorEdit), b2(surfaceColorEdit), b3(borderColorEdit),
+        b4(accentColorEdit), b5(primaryTextColorEdit), b6(secondaryTextColorEdit),
+        b7(mutedTextColorEdit), b8(progressBarColorEdit);
     backgroundColorEdit->setText(settings.backgroundColor);
-    updateColorPreview(backgroundColorEdit, backgroundColorPreview);
+    surfaceColorEdit->setText(settings.surfaceColor);
     borderColorEdit->setText(settings.borderColor);
-    updateColorPreview(borderColorEdit, borderColorPreview);
     accentColorEdit->setText(settings.accentColor);
-    updateColorPreview(accentColorEdit, accentColorPreview);
     primaryTextColorEdit->setText(settings.primaryTextColor);
-    updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, /*checkTextContrast=*/true);
     secondaryTextColorEdit->setText(settings.secondaryTextColor);
-    updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, /*checkTextContrast=*/true);
     mutedTextColorEdit->setText(settings.mutedTextColor);
-    updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, /*checkTextContrast=*/true);
     progressBarColorEdit->setText(settings.progressBarColor);
-    updateColorPreview(progressBarColorEdit, progressBarColorPreview);
-    overlayWidthSpin->setValue(settings.overlayWidth);
-    hideDurationSpin->setValue(settings.hideDurationMs);
+    {
+        const QSignalBlocker bw(overlayWidthSlider), bh(hideDurationSlider);
+        overlayWidthSlider->setValue(settings.overlayWidth);
+        hideDurationSlider->setValue(settings.hideDurationMs);
+    }
+    overlayWidthValue->setText(QString("%1 px").arg(settings.overlayWidth));
+    hideDurationValue->setText(QString("%1 s").arg(settings.hideDurationMs / 1000.0, 0, 'f', 1));
+    updateColorUi();
 }
 
 OverlaySettings SettingsDialog::overlaySettings() const {
     OverlaySettings settings;
     settings.backgroundColor = backgroundColorEdit->text().trimmed();
+    settings.surfaceColor = surfaceColorEdit->text().trimmed();
     settings.borderColor = borderColorEdit->text().trimmed();
     settings.accentColor = accentColorEdit->text().trimmed();
     settings.primaryTextColor = primaryTextColorEdit->text().trimmed();
     settings.secondaryTextColor = secondaryTextColorEdit->text().trimmed();
     settings.mutedTextColor = mutedTextColorEdit->text().trimmed();
     settings.progressBarColor = progressBarColorEdit->text().trimmed();
-    settings.overlayWidth = overlayWidthSpin->value();
-    settings.hideDurationMs = hideDurationSpin->value();
+    settings.overlayWidth = overlayWidthSlider->value();
+    settings.hideDurationMs = hideDurationSlider->value();
+    settings.presetName = presetName;
     return settings;
 }
 
 void SettingsDialog::setKeybindSettings(const KeybindSettings &settings) {
-    coarseStepSpin->setValue(settings.coarseStep);
-    fineStepSpin->setValue(settings.fineStep);
+    keybindFineStep = settings.fineStep;
+    keybindUseShift = settings.useShiftForFineAdjust;
     mainKeyButton->setKeyHex(settings.mainKey);
     likeKeyButton->setKeyHex(settings.likeKey);
     lockKeyButton->setKeyHex(settings.lockKey);
     showKeyButton->setKeyHex(settings.showKey);
-    useShiftFineAdjustCheck->setChecked(settings.useShiftForFineAdjust);
+    for (QPushButton *b : volumeStepButtons) {
+        b->setChecked(b->property("stepValue").toInt() == settings.coarseStep);
+    }
 }
 
 KeybindSettings SettingsDialog::keybindSettings() const {
     KeybindSettings settings;
-    settings.coarseStep = coarseStepSpin->value();
-    settings.fineStep = fineStepSpin->value();
+    settings.coarseStep = 5;
+    for (QPushButton *b : volumeStepButtons) {
+        if (b->isChecked()) {
+            settings.coarseStep = b->property("stepValue").toInt();
+        }
+    }
+    settings.fineStep = keybindFineStep;
+    settings.useShiftForFineAdjust = keybindUseShift;
     settings.mainKey = mainKeyButton->keyHex();
     settings.likeKey = likeKeyButton->keyHex();
     settings.lockKey = lockKeyButton->keyHex();
     settings.showKey = showKeyButton->keyHex();
-    settings.useShiftForFineAdjust = useShiftFineAdjustCheck->isChecked();
     return settings;
 }
 
 void SettingsDialog::setQueueSettings(const QueueSettings &settings) {
-    queueEnabledCheck->setChecked(settings.enabled);
-    queueShowNowPlayingCheck->setChecked(settings.showNowPlaying);
-    queueLockedCheck->setChecked(settings.locked);
-    queueShowLockIconCheck->setChecked(settings.showLockIcon);
+    const QSignalBlocker bm(queueMaxSongsSpin), bo(queueOpacitySpin),
+        bn(queueShowNowPlayingCheck), bl(queueShowLockIconCheck);
     queueMaxSongsSpin->setValue(settings.maxSongs);
     queueOpacitySpin->setValue(settings.opacityPercent);
-    queueHoverColorEdit->setText(settings.hoverColor);
-    updateColorPreview(queueHoverColorEdit, queueHoverColorPreview);
+    queueShowNowPlayingCheck->setChecked(settings.showNowPlaying);
+    queueShowLockIconCheck->setChecked(settings.showLockIcon);
+    queueEnabledState = settings.enabled;
+    queueLockedState = settings.locked;
+    queueHoverColorState = settings.hoverColor;
     queueWindowX = settings.windowX;
     queueWindowY = settings.windowY;
     queueWindowWidth = settings.windowWidth;
@@ -370,13 +1075,13 @@ void SettingsDialog::setQueueSettings(const QueueSettings &settings) {
 
 QueueSettings SettingsDialog::queueSettings() const {
     QueueSettings settings;
-    settings.enabled = queueEnabledCheck->isChecked();
+    settings.enabled = queueEnabledState;
     settings.showNowPlaying = queueShowNowPlayingCheck->isChecked();
-    settings.locked = queueLockedCheck->isChecked();
+    settings.locked = queueLockedState;
     settings.showLockIcon = queueShowLockIconCheck->isChecked();
     settings.maxSongs = queueMaxSongsSpin->value();
     settings.opacityPercent = queueOpacitySpin->value();
-    settings.hoverColor = queueHoverColorEdit->text().trimmed();
+    settings.hoverColor = queueHoverColorState;
     settings.windowX = queueWindowX;
     settings.windowY = queueWindowY;
     settings.windowWidth = queueWindowWidth;
@@ -384,94 +1089,53 @@ QueueSettings SettingsDialog::queueSettings() const {
 }
 
 void SettingsDialog::wireOverlayControls() {
-    auto refreshTextContrastPreviews = [this]() {
-        updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, /*checkTextContrast=*/true);
-        updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, /*checkTextContrast=*/true);
-        updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, /*checkTextContrast=*/true);
-    };
-    // Changing the background re-scores every text color's contrast against it.
-    connect(backgroundColorEdit, &QLineEdit::textChanged, this, [this, refreshTextContrastPreviews](const QString &) { updateColorPreview(backgroundColorEdit, backgroundColorPreview); refreshTextContrastPreviews(); emit overlaySettingsChanged(); });
-    connect(borderColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(borderColorEdit, borderColorPreview); emit overlaySettingsChanged(); });
-    connect(accentColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(accentColorEdit, accentColorPreview); emit overlaySettingsChanged(); });
-    connect(primaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(primaryTextColorEdit, primaryTextColorPreview, true); emit overlaySettingsChanged(); });
-    connect(secondaryTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(secondaryTextColorEdit, secondaryTextColorPreview, true); emit overlaySettingsChanged(); });
-    connect(mutedTextColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(mutedTextColorEdit, mutedTextColorPreview, true); emit overlaySettingsChanged(); });
-    connect(progressBarColorEdit, &QLineEdit::textChanged, this, [this](const QString &) { updateColorPreview(progressBarColorEdit, progressBarColorPreview); emit overlaySettingsChanged(); });
-    connect(overlayWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit overlaySettingsChanged(); });
-    connect(hideDurationSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit overlaySettingsChanged(); });
+    const QList<QLineEdit *> edits = {backgroundColorEdit, surfaceColorEdit, borderColorEdit,
+        accentColorEdit, primaryTextColorEdit, secondaryTextColorEdit, mutedTextColorEdit, progressBarColorEdit};
+    for (QLineEdit *edit : edits) {
+        connect(edit, &QLineEdit::textChanged, this, [this]() {
+            presetName = QStringLiteral("Custom");
+            updateColorUi();
+            emit overlaySettingsChanged();
+        });
+    }
+    connect(overlayWidthSlider, &QSlider::valueChanged, this, [this](int v) {
+        overlayWidthValue->setText(QString("%1 px").arg(v));
+        emit overlaySettingsChanged();
+    });
+    connect(hideDurationSlider, &QSlider::valueChanged, this, [this](int v) {
+        hideDurationValue->setText(QString("%1 s").arg(v / 1000.0, 0, 'f', 1));
+        emit overlaySettingsChanged();
+    });
 }
 
 void SettingsDialog::wireKeybindControls() {
-    connect(coarseStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
-    connect(fineStepSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit keybindSettingsChanged(); });
     mainKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     likeKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     lockKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     showKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
-    connect(useShiftFineAdjustCheck, &QCheckBox::toggled, this, &SettingsDialog::keybindSettingsChanged);
 }
 
 void SettingsDialog::wireQueueControls() {
-    connect(queueEnabledCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
     connect(queueShowNowPlayingCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
-    connect(queueLockedCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
     connect(queueShowLockIconCheck, &QCheckBox::toggled, this, &SettingsDialog::queueSettingsChanged);
     connect(queueMaxSongsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
     connect(queueOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { emit queueSettingsChanged(); });
-    connect(queueHoverColorEdit, &QLineEdit::textChanged, this, [this](const QString &) {
-        updateColorPreview(queueHoverColorEdit, queueHoverColorPreview);
-        emit queueSettingsChanged();
-    });
-}
-
-QWidget *SettingsDialog::createColorFieldRow(QLineEdit *edit, QLabel *preview, QWidget *parent) {
-    QWidget *row = new QWidget(parent);
-    QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(8);
-    layout->addWidget(edit, 1);
-    layout->addWidget(preview, 0);
-    return row;
-}
-
-void SettingsDialog::updateColorPreview(QLineEdit *edit, QLabel *preview, bool checkTextContrast) {
-    const QColor color(edit->text().trimmed());
-    if (!color.isValid()) {
-        preview->setStyleSheet("background-color: #202020; border: 1px solid #aa5555; border-radius: 4px;");
-        preview->setToolTip("Not a valid color");
-        return;
-    }
-
-    // Warn when a text color won't be readable on the chosen background.
-    if (checkTextContrast) {
-        const QColor bg(backgroundColorEdit->text().trimmed());
-        if (bg.isValid()) {
-            const double ratio = contrastRatio(color, bg);
-            if (ratio < 4.5) {
-                preview->setStyleSheet(QString("background-color: %1; border: 2px solid #e0a021; border-radius: 4px;").arg(color.name()));
-                preview->setToolTip(QString("Low contrast on the background (%1:1). Aim for 4.5:1 or higher for readable text.")
-                                        .arg(ratio, 0, 'f', 1));
-                return;
-            }
-            preview->setToolTip(QString("Contrast on the background: %1:1 (good)").arg(ratio, 0, 'f', 1));
-        }
-    } else {
-        preview->setToolTip(color.name());
-    }
-    preview->setStyleSheet(QString("background-color: %1; border: 1px solid #555555; border-radius: 4px;").arg(color.name()));
 }
 
 void SettingsDialog::refreshUi() {
-    connectionValueLabel->setText(authenticated ? "Connected" : "Not connected");
+    const QString value = authenticated ? QStringLiteral("Connected") : QStringLiteral("Not connected");
+    connectionValueLabel->setText(value);
+    sidebarStatus->setText(value);
+    sidebarDot->setStyleSheet(authenticated
+        ? QString("background: %1; border-radius: 4px;").arg(theme::kAccent)
+        : QString("background: %1; border-radius: 4px;").arg(theme::kNeutral600));
 
     connectButton->setEnabled(true);
-    connectButton->setText(authenticated ? "Reconnect Spotify" : "Connect Spotify");
+    connectButton->setText(authenticated ? QStringLiteral("Reconnect Spotify") : QStringLiteral("Connect Spotify"));
 
     if (!authenticated) {
         helpTextLabel->setText(
-            "Click <b>Connect Spotify</b> to authorize. Your browser will open a Spotify "
-            "login page — approve the request, and playback state will start streaming in "
-            "realtime. No password or cookie is ever handled by this app.");
-        helpTextLabel->setOpenExternalLinks(true);
+            "Click <b>Connect Spotify</b> to authorize. Your browser opens a Spotify login page — "
+            "approve the request, and playback state streams in realtime.");
     }
 }
