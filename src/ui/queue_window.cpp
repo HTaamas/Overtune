@@ -454,6 +454,7 @@ void QueueWindow::applyOverlaySettings(const OverlaySettings &settings) {
     hintFont.setLetterSpacing(QFont::AbsoluteSpacing, 0.6);
     lockHintTextLabel->setFont(hintFont);
     lockHintTextLabel->setStyleSheet(QString("color: %1; border: none; background: transparent;").arg(theme::kNeutral600));
+    lockHintIconLabel->setStyleSheet("border: none; background: transparent;");
     lockHintIconLabel->setPixmap(lockPixmap(kHeaderIconSize, QColor(theme::kNeutral600)));
 
     emptyLabel->setFont(theme::uiFont(13));
@@ -905,13 +906,6 @@ void QueueWindow::relayoutStatics() {
     for (Row &row : rows) {
         row.widget->setFixedSize(rowWidth(), kRowHeight);
         row.hoverBg->setGeometry(row.widget->rect());
-        // Locked windows are click-through; dim the rows to signal they aren't
-        // clickable right now.
-        if (auto *e = opacityEffectOf(row.widget)) {
-            if (e->opacity() >= 0.99 || e->opacity() == 0.75) {
-                e->setOpacity(queueSettings.locked ? 0.75 : 1.0);
-            }
-        }
     }
 }
 
