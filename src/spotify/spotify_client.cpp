@@ -42,6 +42,9 @@ namespace {
 constexpr int kPendingVolumeGracePeriodMs = 2500;
 constexpr int kMaxConnectVolume = 65535;
 
+// Past this point in a track, "previous" restarts it instead of skipping back.
+constexpr int kPrevRestartThresholdMs = 5000;
+
 // Well-known Spotify desktop client id (librespot), required for the device flow.
 const char kClientIdHex[] = "65b708073fc0480ea92a077233ca87bd";
 const char kUserAgent[] = "Spotify/125700463 Win32_x86_64/0 (PC desktop)";
@@ -1160,7 +1163,13 @@ void SpotifyClient::nextTrack() {
 }
 
 void SpotifyClient::prevTrack() {
-    sendConnectCommand("skip_prev");
+    // Match the common player behaviour: past the first few seconds, "previous"
+    // restarts the current track rather than jumping to the one before it.
+    if (lastProgressMs > kPrevRestartThresholdMs) {
+        sendConnectCommand("seek_to", QJsonObject{{"value", 0}});
+    } else {
+        sendConnectCommand("skip_prev");
+    }
 }
 
 // ---------------------------------------------------------------------------
