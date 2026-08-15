@@ -28,13 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Match the version used for local development. Also avoids Qt 6.8's
-      # stale reference to the AGL framework, which recent macOS SDKs no longer
-      # ship — that fails the link on the current macOS runner image.
+      # Deliberately a little behind the 6.11 used locally. Two constraints
+      # meet here: old Qt (6.8) still references the AGL framework, which
+      # current macOS SDKs no longer ship, so the macOS link fails; but the
+      # newest releases aren't reliably mirrored yet and aqt fails to resolve
+      # them at all. 6.10.x is past the AGL problem and long since propagated.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.1'
+          version: '6.10.3'
           modules: 'qtwebsockets'
           cache: true
 
