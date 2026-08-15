@@ -156,6 +156,8 @@ private:
     // PKCE flow
     QTcpServer *authServer = nullptr;
     QString codeVerifier;
+    QString authState;                 // CSRF guard echoed back on the redirect
+    QTimer *authServerTimeout = nullptr; // stops the local listener if auth is abandoned
 
     // connect-state / dealer
     QWebSocket *webSocket = nullptr;

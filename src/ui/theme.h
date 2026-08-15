@@ -55,6 +55,15 @@ constexpr auto kDivider = "rgba(233,233,237,0.16)";   // 1px rules, chip borders
 constexpr auto kHoverTint = "rgba(233,233,237,0.06)";  // queue-row / menu-item hover
 constexpr auto kNavHoverTint = "rgba(233,233,237,0.07)"; // sidebar / button hover
 
+// --- Caution ---
+// A muted amber held to the same low-chroma discipline as the blurple accent:
+// used only as text plus a ≤14%-alpha ground and a hairline border, never as a
+// filled block. Currently just the "this key will be swallowed globally"
+// notice on the Keybinds page.
+constexpr auto kWarnText = "#e0c893";
+constexpr auto kWarnBg = "rgba(224,200,147,0.10)";
+constexpr auto kWarnBorder = "rgba(224,200,147,0.32)";
+
 // --- Radius (px) ---
 constexpr int kRadiusSm = 4;   // swatches
 constexpr int kRadiusMd = 8;   // art, rows, buttons, inputs

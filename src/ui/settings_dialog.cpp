@@ -751,6 +751,20 @@ QWidget *SettingsDialog::buildKeybindsPage() {
         rl->addStretch(1);
         layout->addWidget(row);
     }
+
+    // The main key is consumed by the global hook whether or not a modifier is
+    // held, so binding it to a typing key makes that key dead in every other
+    // app. Warn rather than block — repurposing Caps Lock (the default) is the
+    // whole point, and someone may genuinely want an unusual binding.
+    mainKeyWarning = new QLabel(page);
+    mainKeyWarning->setWordWrap(true);
+    mainKeyWarning->setFont(theme::uiFont(11));
+    mainKeyWarning->setStyleSheet(QString(
+        "color: %1; background: %2; border: 1px solid %3; border-radius: %4px; padding: 8px 10px;")
+        .arg(theme::kWarnText, theme::kWarnBg, theme::kWarnBorder).arg(theme::kRadiusMd));
+    mainKeyWarning->hide();
+    layout->addWidget(mainKeyWarning);
+
     auto comboRow = [&](const QString &label, KeyCaptureButton *btn) {
         QWidget *row = new QWidget(page);
         QHBoxLayout *rl = new QHBoxLayout(row);
@@ -1036,9 +1050,47 @@ void SettingsDialog::setKeybindSettings(const KeybindSettings &settings) {
     likeKeyButton->setKeyHex(settings.likeKey);
     lockKeyButton->setKeyHex(settings.lockKey);
     showKeyButton->setKeyHex(settings.showKey);
+    refreshMainKeyWarning();
     for (QPushButton *b : volumeStepButtons) {
         b->setChecked(b->property("stepValue").toInt() == settings.coarseStep);
     }
+}
+
+// The global hook consumes the main key on every press, with or without a
+// modifier, so anything you'd normally type stops reaching other applications.
+// Keys that exist to be repurposed (Caps Lock), or that nothing types with
+// (F-keys, media keys), are fine and stay silent.
+void SettingsDialog::refreshMainKeyWarning() {
+    if (!mainKeyWarning) {
+        return;
+    }
+    bool ok = false;
+    const uint vk = mainKeyButton->keyHex().toUInt(&ok, 16);
+    if (!ok) {
+        mainKeyWarning->hide();
+        return;
+    }
+
+    const bool isTypingKey =
+        (vk >= 'A' && vk <= 'Z') ||       // letters
+        (vk >= '0' && vk <= '9') ||       // top-row digits
+        (vk >= 0x60 && vk <= 0x69) ||     // numpad digits
+        vk == 0x20 ||                     // Space
+        vk == 0x0D ||                     // Enter
+        vk == 0x09 ||                     // Tab
+        vk == 0x08 ||                     // Backspace
+        (vk >= 0xBA && vk <= 0xC0) ||     // ;=,-./` punctuation
+        (vk >= 0xDB && vk <= 0xDE);       // []\'" punctuation
+
+    if (!isTypingKey) {
+        mainKeyWarning->hide();
+        return;
+    }
+    mainKeyWarning->setText(
+        QStringLiteral("Heads up: Overtune swallows this key system-wide while it's running, so "
+                       "it won't type in any other app. Caps Lock, an F-key or a media key is a "
+                       "safer choice — you can change it back here at any time."));
+    mainKeyWarning->show();
 }
 
 KeybindSettings SettingsDialog::keybindSettings() const {
@@ -1109,7 +1161,7 @@ void SettingsDialog::wireOverlayControls() {
 }
 
 void SettingsDialog::wireKeybindControls() {
-    mainKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
+    mainKeyButton->onChanged = [this]() { refreshMainKeyWarning(); emit keybindSettingsChanged(); };
     likeKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     lockKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };
     showKeyButton->onChanged = [this]() { emit keybindSettingsChanged(); };

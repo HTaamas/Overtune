@@ -67,7 +67,9 @@ endif()
 set(PROTO_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/proto")
 set(PROTO_BIN_DIR "${CMAKE_CURRENT_BINARY_DIR}/proto_gen")
 file(MAKE_DIRECTORY ${PROTO_BIN_DIR})
-file(GLOB_RECURSE PROTO_FILES "${PROTO_SRC_DIR}/*.proto")
+# CONFIGURE_DEPENDS so adding a .proto re-runs the glob on the next build
+# instead of silently producing a stale build until someone reconfigures.
+file(GLOB_RECURSE PROTO_FILES CONFIGURE_DEPENDS "${PROTO_SRC_DIR}/*.proto")
 
 set(PROTO_SRCS)
 set(PROTO_HDRS)
@@ -113,6 +115,12 @@ set(SOURCES
     src/main.cpp
     src/spotify/spotify_client.cpp
     src/spotify/spotify_client.h
+    src/spotify/spotify_client_internal.h
+    src/spotify/spotify_client_auth.cpp
+    src/spotify/spotify_client_dealer.cpp
+    src/spotify/spotify_client_queue.cpp
+    src/spotify/spotify_client_remote.cpp
+    src/spotify/spotify_client_collection.cpp
     src/ui/osd_window.cpp
     src/ui/osd_window.h
     src/ui/tray_manager.cpp
@@ -126,6 +134,8 @@ set(SOURCES
     src/input/volume_handler.cpp
     src/settings/app_settings.h
     src/settings/app_settings.cpp
+    src/settings/secure_store.h
+    src/settings/secure_store.cpp
     src/ui/theme.h
     assets/fonts.qrc
     ${PROTO_SRCS}
@@ -145,6 +155,7 @@ if(APPLE)
     list(APPEND SOURCES src/platform/app_behavior_mac.mm)
     list(APPEND SOURCES src/input/volume_handler_mac.mm)
     list(APPEND SOURCES src/ui/osd_window_mac.mm)
+    list(APPEND SOURCES src/settings/secure_store_mac.mm)
     list(APPEND SOURCES "${APP_ICON_ASSET}")
 
     # Build a real .icns from the PNG so the bundle shows an icon in Finder, the
@@ -245,6 +256,7 @@ if(WIN32)
         Gdi32
         Ole32
         Uuid
+        Crypt32 # DPAPI (CryptProtectData) for the refresh token
     )
 
     add_custom_target(runtime_bundle
@@ -352,6 +364,7 @@ if(APPLE)
         "-framework AppKit"
         "-framework ApplicationServices"
         "-framework IOKit"
+        "-framework Security" # Keychain storage for the refresh token
     )
 endif()
 

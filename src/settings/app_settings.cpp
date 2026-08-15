@@ -1,4 +1,5 @@
 #include "app_settings.h"
+#include "secure_store.h"
 #include <QRandomGenerator>
 
 namespace {
@@ -46,19 +47,20 @@ void saveOverlaySettings(const OverlaySettings &config) {
     settings.endGroup();
 }
 
+// The refresh token is a long-lived credential to the user's Spotify account,
+// so it goes through SecureStore (DPAPI on Windows, Keychain on macOS) rather
+// than sitting in QSettings as plaintext. A token written by an older build is
+// migrated on first load — see secure_store.h.
 QString loadRefreshToken() {
-    QSettings settings("Overtune", "Overtune");
-    return settings.value("RefreshToken").toString();
+    return SecureStore::load("RefreshToken");
 }
 
 void saveRefreshToken(const QString &token) {
-    QSettings settings("Overtune", "Overtune");
-    settings.setValue("RefreshToken", token);
+    SecureStore::save("RefreshToken", token);
 }
 
 void clearRefreshToken() {
-    QSettings settings("Overtune", "Overtune");
-    settings.remove("RefreshToken");
+    SecureStore::remove("RefreshToken");
 }
 
 QString loadUsername() {

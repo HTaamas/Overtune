@@ -130,21 +130,23 @@ LRESULT CALLBACK VolumeHandler::LowLevelKeyboardProc(int nCode, WPARAM wParam, L
                 return 1;
             }
 
-            if (pKey->vkCode == instance->keybindSettings.mainKey.toInt(nullptr, 16)) {
-                if (instance) {
-                    if (isShift && isCtrl) {
-                        return 0;
-                    } else if (isShift) {
-                        handleModifierTap(nextTrackTapState, [&]() {
-                            emit instance->nextTrack();
-                        });
-                    } else if (isCtrl) {
-                        handleModifierTap(prevTrackTapState, [&]() {
-                            emit instance->prevTrack();
-                        });
-                    } else {
-                        emit instance->toggleMusic();
-                    }
+            // mainVk is only non-zero when `instance` is live, so the emits below
+            // need no further guard (the hook runs on the thread that installed
+            // it, so `instance` can't be torn down mid-callback).
+            const DWORD mainVk = instance ? DWORD(instance->keybindSettings.mainKey.toUInt(nullptr, 16)) : 0;
+            if (mainVk != 0 && pKey->vkCode == mainVk) {
+                if (isShift && isCtrl) {
+                    return 0;
+                } else if (isShift) {
+                    handleModifierTap(nextTrackTapState, [&]() {
+                        emit instance->nextTrack();
+                    });
+                } else if (isCtrl) {
+                    handleModifierTap(prevTrackTapState, [&]() {
+                        emit instance->prevTrack();
+                    });
+                } else {
+                    emit instance->toggleMusic();
                 }
 
                 return 1;

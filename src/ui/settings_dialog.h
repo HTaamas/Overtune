@@ -111,6 +111,10 @@ private:
     KeyCaptureButton *likeKeyButton = nullptr;
     KeyCaptureButton *lockKeyButton = nullptr;
     KeyCaptureButton *showKeyButton = nullptr;
+    // Shown when the main key is bound to something you'd normally type with:
+    // the hook swallows that key globally, so it stops working everywhere else.
+    QLabel *mainKeyWarning = nullptr;
+    void refreshMainKeyWarning();
     QList<QPushButton *> volumeStepButtons; // segmented: 5 / 2 / 10
 #ifdef _WIN32
     QCheckBox *runAsAdminCheck = nullptr;
