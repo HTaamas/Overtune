@@ -4,6 +4,9 @@
 
 #ifdef __linux__
 #include <QGuiApplication>
+// Safe here (rather than in the header): nothing else includes this file, so
+// Xlib's macros can't leak into unrelated translation units.
+#include <X11/Xlib.h>
 #include <X11/XF86keysym.h>
 
 namespace {

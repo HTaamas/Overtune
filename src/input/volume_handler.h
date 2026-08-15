@@ -9,7 +9,16 @@
 #endif
 
 #ifdef __linux__
-#include <X11/Xlib.h>
+// Deliberately NOT <X11/Xlib.h>. That header #defines None, Bool, Status,
+// KeyPress, KeyRelease, FocusIn, FocusOut, Expose and more as bare macros,
+// which then rewrite ordinary identifiers in every file that includes this one
+// — queue_window.h's `enum class EdgeHit { None, ... }` becomes
+// `{ 0L, ... }` and fails to compile. These two typedefs are identical to
+// Xlib's own, so the real header can still be included alongside them in the
+// implementation file.
+struct _XDisplay;
+using Display = _XDisplay;
+using Window = unsigned long;
 #endif
 
 #ifdef __APPLE__

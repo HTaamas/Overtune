@@ -28,12 +28,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Qt on the runners is older than the 6.11 used locally; that's fine here,
-      # since the point is catching compile breakage, not matching the dev setup.
+      # Match the version used for local development. Also avoids Qt 6.8's
+      # stale reference to the AGL framework, which recent macOS SDKs no longer
+      # ship — that fails the link on the current macOS runner image.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.1'
+          version: '6.11.1'
           modules: 'qtwebsockets'
           cache: true
 

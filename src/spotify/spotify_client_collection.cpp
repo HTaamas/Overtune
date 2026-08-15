@@ -9,6 +9,7 @@
 
 #include <QDateTime>
 #include <QUuid>
+#include <cstring>
 
 using namespace spotify_client;
 
@@ -54,14 +55,22 @@ static QString gidToBase62(const std::string &gid) {
     }
     static const char kAlphabet[] =
         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    unsigned __int128 n = 0;
-    for (unsigned char byte : gid) {
-        n = (n << 8) | byte;
-    }
+
+    // Long division over the raw bytes treated as a big-endian base-256 bignum,
+    // rather than a single 128-bit integer: __int128 is a GCC/Clang extension
+    // that MSVC rejects outright. 62^22 > 2^128, so 22 digits always suffice.
+    unsigned char n[16];
+    std::memcpy(n, gid.data(), sizeof(n));
+
     char out[22];
     for (int i = 21; i >= 0; --i) {
-        out[i] = kAlphabet[int(n % 62)];
-        n /= 62;
+        unsigned int remainder = 0;
+        for (unsigned char &digit : n) {
+            const unsigned int cur = (remainder << 8) | digit;
+            digit = static_cast<unsigned char>(cur / 62);
+            remainder = cur % 62;
+        }
+        out[i] = kAlphabet[remainder];
     }
     return QString::fromLatin1(out, 22);
 }

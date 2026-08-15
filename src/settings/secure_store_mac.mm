@@ -58,9 +58,13 @@ QString SecureStore::load(const QString &key) {
     CFTypeRef result = NULL;
     const OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
     if (status == errSecSuccess && result) {
-        NSData *data = (__bridge_transfer NSData *)result;
+        // This file is compiled without ARC, so __bridge_transfer wouldn't
+        // actually transfer anything — the +1 reference SecItemCopyMatching
+        // hands back has to be released by hand or it leaks.
+        NSData *data = (NSData *)result;
         const QString value = QString::fromUtf8(static_cast<const char *>(data.bytes),
                                                 int(data.length));
+        CFRelease(result);
         if (!value.isEmpty()) {
             return value;
         }
