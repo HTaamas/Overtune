@@ -296,6 +296,11 @@ if(WIN32)
             "${QT_BIN_DIR}/Qt6Core.dll"
             "${QT_BIN_DIR}/Qt6Gui.dll"
             "${QT_BIN_DIR}/Qt6Network.dll"
+            # Qt6WebSockets is a hard import (the dealer connection): without it
+            # Windows refuses to start the process at all. This list is hand
+            # maintained, so anything added to target_link_libraries has to be
+            # mirrored here — runtime_bundle uses windeployqt and can't drift.
+            "${QT_BIN_DIR}/Qt6WebSockets.dll"
             "${QT_BIN_DIR}/Qt6Widgets.dll"
             "${QT_BIN_DIR}/D3Dcompiler_47.dll"
             "${WINDOWS_MIN_RUNTIME_DIR}/"
