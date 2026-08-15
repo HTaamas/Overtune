@@ -1,0 +1,60 @@
+name: Build
+
+# Verifies the tree still compiles on all three targets. The macOS and Linux
+# paths (volume_handler_mac.mm, secure_store_mac.mm, the X11 bits) aren't
+# exercised during day-to-day Windows development, so this is mainly here to
+# catch bitrot in them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # one platform breaking shouldn't hide the others
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt on the runners is older than the 6.11 used locally; that's fine here,
+      # since the point is catching compile breakage, not matching the dev setup.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Install Linux X11 dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor0 \
+            libgl1-mesa-dev ninja-build
+
+      # protobuf + zlib come in via FetchContent, so cache the populated _deps
+      # tree — otherwise every run re-clones and rebuilds protoc from source.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
