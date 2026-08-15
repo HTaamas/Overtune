@@ -1,0 +1,86 @@
+name: Release
+
+# Packages a Windows build and publishes it when a version tag is pushed.
+# Only Windows ships: it's the platform with real bundling support
+# (windeployqt via the runtime_bundle target). macOS builds an unsigned .app
+# that Gatekeeper blocks, and Linux has no bundling target at all, so both stay
+# build-checked by build.yml rather than released.
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+*'   # the existing convention, e.g. 1.0
+      - 'v[0-9]+.[0-9]+*'  # and the v-prefixed variant, just in case
+  workflow_dispatch:        # dry run: builds and uploads the zip, publishes nothing
+
+permissions:
+  contents: write # required to create the release
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # MinGW, not MSVC. runtime_min_bundle copies libwinpthread-1.dll, and the
+      # README documents a MinGW-based Qt, so releases follow the toolchain the
+      # project actually targets. (build.yml still checks MSVC separately.)
+      - name: Install Qt (MinGW)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: 'win64_mingw'
+          modules: 'qtwebsockets'
+          tools: 'tools_mingw1310'
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      # windeployqt-based: it scans the binary's actual imports, so it can't
+      # silently miss a DLL the way a hand-maintained list can.
+      - name: Bundle runtime
+        run: cmake --build build --target runtime_bundle
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = if ($env:GITHUB_REF -like 'refs/tags/*') { "Overtune-$env:GITHUB_REF_NAME-win64" } else { "Overtune-dev-win64" }
+          Compress-Archive -Path build/runtime/* -DestinationPath "$name.zip"
+          "ZIP_NAME=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Sanity check: refuse to ship an archive missing a DLL the exe imports.
+      # runtime_min_bundle shipped without Qt6WebSockets.dll for a while, which
+      # made the app unable to start at all; this makes that class of bug loud.
+      - name: Verify bundle completeness
+        shell: pwsh
+        run: |
+          $exe = "build/runtime/Overtune.exe"
+          $imports = & objdump -p $exe |
+            Select-String "DLL Name:" |
+            ForEach-Object { ($_ -split "DLL Name:")[1].Trim() } |
+            Where-Object { $_ -like "Qt6*" }
+          $present = Get-ChildItem "build/runtime/*.dll" | ForEach-Object { $_.Name }
+          $missing = $imports | Where-Object { $present -notcontains $_ }
+          if ($missing) {
+            Write-Error "Bundle is missing required DLLs: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Output "All imported Qt DLLs are present: $($imports -join ', ')"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+
+      # Tag pushes only — a manual run is a packaging dry run and publishes nothing.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" "$env:ZIP_NAME" --generate-notes
