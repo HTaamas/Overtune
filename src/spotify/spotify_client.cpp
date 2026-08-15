@@ -33,6 +33,7 @@ QT_WARNING_PUSH
 #include "spotify/extendedmetadata/entity_extension_data.pb.h"
 #include "spotify/metadata/metadata.pb.h"
 #include "spotify/collection/collection.pb.h"
+#include "spotify/collection/collection_update.pb.h"
 #pragma pop_macro("emit")
 #pragma pop_macro("slots")
 #pragma pop_macro("signals")
@@ -602,6 +603,47 @@ void SpotifyClient::onWebSocketTextMessageReceived(const QString &message) {
             payload = gunzip(payload);
         }
         handleClusterBytes(payload, /*isUpdate=*/true);
+        return;
+    }
+
+    // Liked Songs changed on some device: the backend pushes the delta here, so
+    // this stays in sync without polling. Two variants fire per change — a proto
+    // payload we parse and an opaque "/json" one we ignore.
+    if (uri.startsWith("hm://collection/collection/")) {
+        // Apply the delta straight from the push proto — no re-page — and only
+        // fall back to a full resync if the payload won't parse.
+        if (!uri.endsWith("/json")) {
+            const QJsonObject headers = obj.value("headers").toObject();
+            const QJsonArray payloads = obj.value("payloads").toArray();
+            QByteArray payload;
+            if (!payloads.isEmpty()) {
+                payload = QByteArray::fromBase64(payloads.first().toString().toUtf8());
+                if (headers.value("Transfer-Encoding").toString() == "gzip") {
+                    payload = gunzip(payload);
+                }
+            }
+            if (!applyCollectionDelta(payload)) {
+                logMessage("[like] collection push unparseable; resyncing");
+                resyncLikedTracks();
+            }
+        }
+        return;
+    }
+
+    // Playlist-domain pushes (algorithmic playlist revisions, the per-artist
+    // "Liked Songs" views) ride the same socket and fire on every like, but this
+    // app doesn't surface playlists — drop them quietly so they don't drown the
+    // log. Known-irrelevant, so no need to keep rediscovering them.
+    if (uri.startsWith("hm://playlist/")) {
+        return;
+    }
+
+    // Discovery: log anything genuinely new we don't yet route. Handy for mapping
+    // further topics off the wire.
+    if (!uri.isEmpty()) {
+        const QJsonArray payloads = obj.value("payloads").toArray();
+        logMessage(QString("[WS] unhandled push uri=%1 payloads=%2")
+                       .arg(uri).arg(payloads.size()));
     }
 }
 
@@ -1191,8 +1233,103 @@ void SpotifyClient::ensureUserProfile() {
     if (!likedSetRequested) {
         likedSetRequested = true;
         logMessage(QString("[like] loading Liked Songs for %1...").arg(username));
-        fetchLikedTracks(QString(), 0);
+        resyncLikedTracks();
     }
+
+    // Steady-state freshness comes from the dealer collection push (see
+    // onWebSocketTextMessageReceived). This slow timer is only a safety net for
+    // pushes missed while the socket was down — hence minutes, not seconds.
+    if (!likedResyncTimer) {
+        likedResyncTimer = new QTimer(this);
+        likedResyncTimer->setInterval(5 * 60 * 1000);
+        connect(likedResyncTimer, &QTimer::timeout, this, [this]() { resyncLikedTracks(); });
+        likedResyncTimer->start();
+    }
+}
+
+// A track's 16-byte GID (as carried in collection pushes and metadata) maps to
+// the 22-char base62 id used in "spotify:track:<id>" and in likedTrackIds. It's
+// a straight base conversion of the 128-bit value, zero-padded to 22 digits.
+static QString gidToBase62(const std::string &gid) {
+    if (gid.size() != 16) {
+        return QString();
+    }
+    static const char kAlphabet[] =
+        "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    unsigned __int128 n = 0;
+    for (unsigned char byte : gid) {
+        n = (n << 8) | byte;
+    }
+    char out[22];
+    for (int i = 21; i >= 0; --i) {
+        out[i] = kAlphabet[int(n % 62)];
+        n /= 62;
+    }
+    return QString::fromLatin1(out, 22);
+}
+
+// Apply a dealer collection push (hm://collection/collection/<user>) in place,
+// with no network round-trip. The payload is a CollectionUpdate: each item is a
+// changed track (raw GID) with is_removed telling like from unlike. Returns
+// false if the bytes aren't a well-formed delta so the caller can resync.
+bool SpotifyClient::applyCollectionDelta(const QByteArray &protoBytes) {
+    spotify::collection::CollectionUpdate update;
+    if (!update.ParseFromArray(protoBytes.constData(), int(protoBytes.size()))) {
+        return false;
+    }
+
+    bool sawValidItem = false;
+    bool changed = false;
+    for (const auto &item : update.items()) {
+        if (item.item_gid().size() != 16) {
+            continue; // not a track GID we can map — treat payload as unknown
+        }
+        sawValidItem = true;
+        const QString id = gidToBase62(item.item_gid());
+        if (item.is_removed()) {
+            if (likedTrackIds.remove(id)) {
+                changed = true;
+            }
+        } else if (!likedTrackIds.contains(id)) {
+            likedTrackIds.insert(id);
+            changed = true;
+        }
+    }
+    if (!sawValidItem) {
+        return false; // parsed to something, but nothing we understand — resync
+    }
+
+    if (changed) {
+        logMessage(QString("[like] applied collection push (%1 tracks liked)")
+                       .arg(likedTrackIds.size()));
+        emit likedSongsLoaded();
+        // Keep the queue's heart flags in step with the change.
+        bool queueChangedFlag = false;
+        for (UpcomingTrack &t : lastQueue) {
+            const bool liked = isTrackLiked(t.trackId);
+            if (t.liked != liked) {
+                t.liked = liked;
+                queueChangedFlag = true;
+            }
+        }
+        if (queueChangedFlag) {
+            lastQueueSignature = queueSignatureFor(lastQueue);
+            emit queueChanged(lastQueue);
+        }
+    }
+    return true;
+}
+
+// Re-page the whole collection into a fresh buffer and swap it in on completion.
+// Rebuilding (rather than merging) is what lets an unlike made elsewhere drop
+// out of our set — the old code only ever inserted, so removals never landed.
+void SpotifyClient::resyncLikedTracks() {
+    if (username.isEmpty() || likedSyncInProgress) {
+        return;
+    }
+    likedSyncInProgress = true;
+    likedSyncBuffer.clear();
+    fetchLikedTracks(QString(), 0);
 }
 
 void SpotifyClient::fetchLikedTracks(const QString &paginationToken, int page) {
@@ -1221,11 +1358,13 @@ void SpotifyClient::fetchLikedTracks(const QString &paginationToken, int page) {
 
         if (status == 401) {
             likedSetRequested = false;
+            likedSyncInProgress = false;
             refreshAccessToken();
             QTimer::singleShot(5000, this, [this]() { ensureUserProfile(); });
             return;
         }
         if (status != 200) {
+            likedSyncInProgress = false; // let the next poll retry rather than wedging
             logMessage(QString("[like] loading Liked Songs failed (HTTP %1): %2")
                            .arg(status).arg(QString::fromUtf8(data.left(200))));
             return;
@@ -1233,6 +1372,7 @@ void SpotifyClient::fetchLikedTracks(const QString &paginationToken, int page) {
 
         spotify::collection::PageResponse resp;
         if (!resp.ParseFromArray(data.constData(), int(data.size()))) {
+            likedSyncInProgress = false;
             logMessage("[like] could not parse the Liked Songs page");
             return;
         }
@@ -1240,30 +1380,40 @@ void SpotifyClient::fetchLikedTracks(const QString &paginationToken, int page) {
         for (const auto &item : resp.items()) {
             const QString uri = QString::fromStdString(item.uri());
             if (!item.is_removed() && uri.startsWith("spotify:track:")) {
-                likedTrackIds.insert(uri.section(':', 2, 2));
+                likedSyncBuffer.insert(uri.section(':', 2, 2));
             }
         }
 
         const QString nextToken = QString::fromStdString(resp.next_page_token());
         if (!nextToken.isEmpty() && page < 200) {
             fetchLikedTracks(nextToken, page + 1);
-        } else {
-            logMessage(QString("[like] Liked Songs loaded (%1 tracks)").arg(likedTrackIds.size()));
-            emit likedSongsLoaded();
-            // The queue was likely built before the liked set arrived; refresh
-            // its heart flags now that we know what's liked.
-            bool changed = false;
-            for (UpcomingTrack &t : lastQueue) {
-                const bool liked = isTrackLiked(t.trackId);
-                if (t.liked != liked) {
-                    t.liked = liked;
-                    changed = true;
-                }
+            return;
+        }
+
+        // Page-walk complete: swap the freshly-built set in atomically.
+        likedSyncInProgress = false;
+        const bool setChanged = (likedSyncBuffer != likedTrackIds);
+        likedTrackIds = likedSyncBuffer;
+        likedSyncBuffer.clear();
+        logMessage(QString("[like] Liked Songs loaded (%1 tracks)").arg(likedTrackIds.size()));
+
+        if (!setChanged) {
+            return; // nothing moved since the last poll — don't churn the UI
+        }
+        emit likedSongsLoaded();
+        // Refresh the queue's heart flags against the new set (the queue may have
+        // been built before this, or an external like/unlike may have landed).
+        bool changed = false;
+        for (UpcomingTrack &t : lastQueue) {
+            const bool liked = isTrackLiked(t.trackId);
+            if (t.liked != liked) {
+                t.liked = liked;
+                changed = true;
             }
-            if (changed) {
-                lastQueueSignature = queueSignatureFor(lastQueue);
-                emit queueChanged(lastQueue);
-            }
+        }
+        if (changed) {
+            lastQueueSignature = queueSignatureFor(lastQueue);
+            emit queueChanged(lastQueue);
         }
     });
 }
@@ -1316,6 +1466,16 @@ void SpotifyClient::toggleLikeCurrentTrack() {
                 likedTrackIds.insert(trackId);
             } else {
                 likedTrackIds.remove(trackId);
+            }
+            // If a background resync is mid page-walk, mirror the change into its
+            // buffer too, so the imminent swap can't clobber this local toggle
+            // with a server view that hasn't indexed the write yet.
+            if (likedSyncInProgress) {
+                if (makeLiked) {
+                    likedSyncBuffer.insert(trackId);
+                } else {
+                    likedSyncBuffer.remove(trackId);
+                }
             }
         }
         logMessage(success

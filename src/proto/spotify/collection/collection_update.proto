@@ -1,0 +1,21 @@
+// The realtime delta the dealer pushes on hm://collection/collection/<user>
+// whenever Liked Songs changes on any device. Reverse-engineered off the wire
+// (see gidToBase62 / applyCollectionDelta in spotify_client.cpp): the changed
+// track arrives as a raw 16-byte GID, with add vs. remove signalled by
+// is_removed (added_at is the like timestamp, 0 on removal).
+syntax = "proto3";
+
+package spotify.collection;
+
+option optimize_for = CODE_SIZE;
+
+message CollectionTrackUpdate {
+  int32 item_type = 1;   // observed 0 (track)
+  bytes item_gid = 2;    // raw 16-byte track GID
+  int64 added_at = 5;    // unix seconds; 0 when removed
+  bool is_removed = 6;   // true when the track was unliked
+}
+
+message CollectionUpdate {
+  repeated CollectionTrackUpdate items = 1;
+}

@@ -118,7 +118,11 @@ private:
 
     // --- liked songs (spclient collection service) ---
     void ensureUserProfile();
+    void resyncLikedTracks();
     void fetchLikedTracks(const QString &paginationToken, int page);
+    // Apply a dealer collection push directly (no re-page). Returns false if the
+    // payload isn't a well-formed delta, so the caller can fall back to a resync.
+    bool applyCollectionDelta(const QByteArray &protoBytes);
 
     // --- helpers ---
     QNetworkRequest spclientRequest(const QUrl &url) const; // Authorization + Client-Token + Connection-Id
@@ -174,7 +178,10 @@ private:
     // liked songs
     QString username;
     QSet<QString> likedTrackIds;
-    bool likedSetRequested = false;
+    QSet<QString> likedSyncBuffer;         // accumulates a full page-walk; swapped in atomically on completion
+    bool likedSetRequested = false;        // first load has been kicked off
+    bool likedSyncInProgress = false;      // a page-walk is currently running
+    QTimer *likedResyncTimer = nullptr;    // periodic full resync, catches likes/unlikes from other clients
 
     // upcoming queue (cluster next_tracks, metadata resolved lazily)
     QList<UpcomingTrack> lastQueue;
