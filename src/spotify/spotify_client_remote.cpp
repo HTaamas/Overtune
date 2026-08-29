@@ -50,9 +50,14 @@ void SpotifyClient::nextTrack() {
 }
 
 void SpotifyClient::prevTrack() {
+    int currentProgressMs = lastProgressMs;
+    if (lastIsPlaying && lastProgressTimer.isValid()) {
+        currentProgressMs += int(lastProgressTimer.elapsed());
+    }
+
     // Match the common player behaviour: past the first few seconds, "previous"
     // restarts the current track rather than jumping to the one before it.
-    if (lastProgressMs > kPrevRestartThresholdMs) {
+    if (currentProgressMs > kPrevRestartThresholdMs) {
         sendConnectCommand("seek_to", QJsonObject{{"value", 0}});
     } else {
         sendConnectCommand("skip_prev");

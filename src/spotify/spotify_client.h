@@ -172,6 +172,7 @@ private:
     bool volumeControlSupported = true;
     int currentVolume = 50;
     int lastProgressMs = 0;
+    QElapsedTimer lastProgressTimer;
     int lastDurationMs = 0;
     bool lastIsPlaying = false;
     int pendingVolume = -1;

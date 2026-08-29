@@ -129,7 +129,9 @@ void SpotifyClient::onWebSocketTextMessageReceived(const QString &message) {
     // "Liked Songs" views) ride the same socket and fire on every like, but this
     // app doesn't surface playlists — drop them quietly so they don't drown the
     // log. Known-irrelevant, so no need to keep rediscovering them.
-    if (uri.startsWith("hm://playlist/")) {
+    if (uri.startsWith("hm://playlist/") ||
+        uri.startsWith("hm://herodotus/uri/spotify:list:play-history:v1/resume-point-revision/") ||
+        uri.startsWith("social-connect/v2/broadcast_status_update")) {
         return;
     }
 
@@ -294,6 +296,7 @@ void SpotifyClient::handleClusterBytes(const QByteArray &protoBytes, bool isUpda
 
     currentVolume = qBound(0, volumePercent, 100);
     lastProgressMs = int(positionMs);
+    lastProgressTimer.start();
     lastDurationMs = durationMs;
     lastIsPlaying = isPlaying;
     setVolumeControlSupported(volumeSupported);
